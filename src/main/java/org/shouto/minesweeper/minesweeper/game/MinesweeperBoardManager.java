@@ -39,17 +39,13 @@ public final class MinesweeperBoardManager {
             for (int z = -1; z <= height; z++) {
                 BlockPos groundPos = origin.offset(x, 0, z);
                 boolean border = x == -1 || z == -1 || x == width || z == height;
-                BlockState groundState = border
-                        ? Blocks.QUARTZ_BLOCK.defaultBlockState()
-                        : (((x + z) & 1) == 0
-                        ? MinesweeperBlocks.HIDDEN_BLOCK_1.defaultBlockState()
-                        : MinesweeperBlocks.HIDDEN_BLOCK_2.defaultBlockState());
+                BlockState groundState = border ? Blocks.QUARTZ_BLOCK.defaultBlockState() : hiddenGroundState(x, z);
                 captureAndSet(level, snapshot, groundPos, groundState);
                 captureAndSet(level, snapshot, groundPos.above(), Blocks.AIR.defaultBlockState());
             }
         }
 
-        BlockPos cratePos = origin.offset(width + 2, 0, Math.max(0, height / 2));
+        BlockPos cratePos = flagCratePosition(origin, width, height);
         captureAndSet(level, snapshot, cratePos, MinesweeperBlocks.FLAG_CRATE_BLOCK.defaultBlockState());
         captureAndSet(level, snapshot, cratePos.above(), Blocks.AIR.defaultBlockState());
 
@@ -82,15 +78,6 @@ public final class MinesweeperBoardManager {
         );
         BOARDS.put(boardId, board);
 
-        // Minas invisibles con hitbox tipo placa por encima de cada casilla.
-        for (long local : mines) {
-            int localX = localX(local);
-            int localZ = localZ(local);
-            BlockPos markerPos = origin.offset(localX, 0, localZ).above();
-            capture(board, level, markerPos);
-            level.setBlock(markerPos, MinesweeperBlocks.MINE_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
-        }
-
         return new CreateBoardResult(boardId, totalCells, requestedMines, mineCount, cratePos);
     }
 
@@ -114,6 +101,10 @@ public final class MinesweeperBoardManager {
         return Optional.ofNullable(BOARDS.get(boardId));
     }
 
+    public static List<BoardData> getAllBoards() {
+        return new ArrayList<>(BOARDS.values());
+    }
+
     public static List<BoardData> getBoardsInDimension(ResourceKey<Level> dimension) {
         List<BoardData> result = new ArrayList<>();
         for (BoardData board : BOARDS.values()) {
@@ -122,6 +113,15 @@ public final class MinesweeperBoardManager {
             }
         }
         return result;
+    }
+
+    public static void resetAllBoardStates(MinecraftServer server) {
+        for (BoardData board : BOARDS.values()) {
+            ServerLevel level = server.getLevel(board.dimension());
+            if (level != null) {
+                resetBoardState(level, board);
+            }
+        }
     }
 
     public static Optional<BoardData> getBoardAt(ServerLevel level, BlockPos pos) {
@@ -251,7 +251,7 @@ public final class MinesweeperBoardManager {
 
         BlockPos markerPos = cellPos.above();
         BlockState markerState = level.getBlockState(markerPos);
-        if (!markerState.isAir() && markerState.getBlock() != MinesweeperBlocks.MINE_BLOCK) {
+        if (!markerState.isAir()) {
             return false;
         }
 
@@ -273,10 +273,7 @@ public final class MinesweeperBoardManager {
 
         BlockPos markerPos = cellPos.above();
         capture(board, level, markerPos);
-        BlockState restoredState = (board.mines().contains(local) && !board.disarmedMines().contains(local))
-                ? MinesweeperBlocks.MINE_BLOCK.defaultBlockState()
-                : Blocks.AIR.defaultBlockState();
-        level.setBlock(markerPos, restoredState, Block.UPDATE_ALL);
+        level.setBlock(markerPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         return true;
     }
 
@@ -331,9 +328,28 @@ public final class MinesweeperBoardManager {
     }
 
     private static void revealMine(ServerLevel level, BoardData board, BlockPos cellPos) {
-        BlockPos markerPos = cellPos.above();
-        capture(board, level, markerPos);
-        level.setBlock(markerPos, MinesweeperBlocks.MINE_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        capture(board, level, cellPos);
+        level.setBlock(cellPos, MinesweeperBlocks.MINE_OPEN_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+    }
+
+    private static void resetBoardState(ServerLevel level, BoardData board) {
+        board.disarmedMines().clear();
+        board.revealed().clear();
+        board.flagged().clear();
+
+        for (int x = -1; x <= board.width(); x++) {
+            for (int z = -1; z <= board.height(); z++) {
+                BlockPos groundPos = board.origin().offset(x, 0, z);
+                boolean border = x == -1 || z == -1 || x == board.width() || z == board.height();
+                BlockState groundState = border ? Blocks.QUARTZ_BLOCK.defaultBlockState() : hiddenGroundState(x, z);
+                level.setBlock(groundPos, groundState, Block.UPDATE_ALL);
+                level.setBlock(groundPos.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+
+        BlockPos cratePos = flagCratePosition(board.origin(), board.width(), board.height());
+        level.setBlock(cratePos, MinesweeperBlocks.FLAG_CRATE_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        level.setBlock(cratePos.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
     }
 
     private static void capture(BoardData board, ServerLevel level, BlockPos pos) {
@@ -347,20 +363,22 @@ public final class MinesweeperBoardManager {
         level.setBlock(immutable, newState, Block.UPDATE_ALL);
     }
 
+    private static BlockState hiddenGroundState(int x, int z) {
+        return ((x + z) & 1) == 0
+                ? MinesweeperBlocks.HIDDEN_BLOCK_1.defaultBlockState()
+                : MinesweeperBlocks.HIDDEN_BLOCK_2.defaultBlockState();
+    }
+
+    private static BlockPos flagCratePosition(BlockPos origin, int width, int height) {
+        return origin.offset(width + 2, 0, Math.max(0, height / 2));
+    }
+
     private static long toLocal(BoardData board, BlockPos worldPos) {
         return packLocal(worldPos.getX() - board.origin().getX(), worldPos.getZ() - board.origin().getZ());
     }
 
     private static long packLocal(int x, int z) {
         return ((long) x << 32) ^ (z & 0xffffffffL);
-    }
-
-    private static int localX(long packed) {
-        return (int) (packed >> 32);
-    }
-
-    private static int localZ(long packed) {
-        return (int) packed;
     }
 
     public enum RevealResult {

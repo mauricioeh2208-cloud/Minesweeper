@@ -11,6 +11,7 @@ import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
@@ -26,7 +27,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.scores.PlayerTeam;
 import org.shouto.minesweeper.minesweeper.entity.MineExplosionEntity;
 import org.shouto.minesweeper.minesweeper.game.MinesweeperBoardManager.BoardData;
 import org.shouto.minesweeper.minesweeper.game.MinesweeperBoardManager.RevealResult;
@@ -36,9 +36,11 @@ import org.shouto.minesweeper.minesweeper.network.payload.PlayerInteractionAnimP
 import org.shouto.minesweeper.minesweeper.registry.MinesweeperBlocks;
 import org.shouto.minesweeper.minesweeper.registry.MinesweeperItems;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -46,17 +48,17 @@ import java.util.UUID;
 
 public final class MinesweeperGameplay {
     private static final int INTERACCION_COOLDOWN_TICKS = 12;
-    private static final int DESACTIVADOR_COOLDOWN_TICKS = 80;
-    private static final int TOTEM_COOLDOWN_TICKS = 20 * 45;
     private static final int INTERACTION_ANIMATION_TICKS = 8;
     private static final int FLAG_PICKUP_ANIMATION_TICKS = 12;
-    private static final int STEP_MINE_TRIGGER_DELAY_TICKS = 8;
-    private static final int RESPAWN_WAIT_TICKS = 20 * 8;
-    private static final int DISARM_CHALLENGE_TIMEOUT_TICKS = 20 * 10;
     private static final int SNAPSHOT_SYNC_INTERVAL_TICKS = 10;
     private static final int INACTIVE_MINE_EFFECT_COOLDOWN_TICKS = 14;
     private static final int EXPLOSION_GECKO_LIFE_TICKS = MineExplosionEntity.ANIMATION_DURATION_TICKS;
     private static final double EXPLOSION_GECKO_HEIGHT_OFFSET = 0.9D;
+    private static final float MINE_EXPLOSION_POWER = 2.35F;
+    private static final double MINE_EXPLOSION_RADIUS = 1.9D;
+    private static final double MINE_EXPLOSION_RADIUS_SQR = MINE_EXPLOSION_RADIUS * MINE_EXPLOSION_RADIUS;
+    private static final double MINE_EXPLOSION_VERTICAL_REACH = 2.5D;
+    private static final double MINE_EXPLOSION_PUSH = 1.05D;
     private static final double MAX_INTERACTION_DISTANCE_SQR = 2.25D;
 
     private static final Map<UUID, Integer> TOTEM_READY_TICK = new HashMap<>();
@@ -78,17 +80,25 @@ public final class MinesweeperGameplay {
         ServerTickEvents.END_WORLD_TICK.register(MinesweeperGameplay::onWorldTick);
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            if (!MinesweeperRoundManager.isActive() || !MinesweeperRoundManager.isParticipant(newPlayer)) {
+                return;
+            }
+
             int tick = newPlayer.level().getServer() != null ? newPlayer.level().getServer().getTickCount() : 0;
-            PlayerTeam team = newPlayer.getTeam();
-            if (team != null && ELIMINATED_TEAMS.contains(team.getName())) {
+            String teamKey = MinesweeperSessionManager.teamKeyForPlayer(newPlayer);
+            if ((teamKey != null && ELIMINATED_TEAMS.contains(teamKey)) || MinesweeperSessionManager.shouldForceSpectator(newPlayer)) {
                 newPlayer.setGameMode(net.minecraft.world.level.GameType.SPECTATOR);
                 return;
             }
 
-            RESPAWN_RELEASE_TICK.put(newPlayer.getUUID(), tick + RESPAWN_WAIT_TICKS);
+            int waitTicks = respawnWaitTicks();
+            RESPAWN_RELEASE_TICK.put(newPlayer.getUUID(), tick + waitTicks);
             PENDING_MINE_TRIGGERS.remove(newPlayer.getUUID());
             newPlayer.setGameMode(net.minecraft.world.level.GameType.SPECTATOR);
-            newPlayer.displayClientMessage(Component.literal("Respawn bloqueado por 8 segundos."), false);
+            newPlayer.displayClientMessage(
+                    Component.literal("Respawn bloqueado por " + formatSeconds(waitTicks) + " segundos."),
+                    false
+            );
         });
 
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
@@ -96,6 +106,9 @@ public final class MinesweeperGameplay {
                 return true;
             }
             if (!source.is(DamageTypeTags.IS_EXPLOSION)) {
+                return true;
+            }
+            if (!MinesweeperRoundManager.isParticipant(player)) {
                 return true;
             }
 
@@ -111,7 +124,7 @@ public final class MinesweeperGameplay {
         });
 
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
-            if (entity instanceof ServerPlayer player) {
+            if (entity instanceof ServerPlayer player && MinesweeperRoundManager.isParticipant(player)) {
                 PENDING_MINE_TRIGGERS.remove(player.getUUID());
                 evaluateTeamElimination(player);
             }
@@ -119,6 +132,7 @@ public final class MinesweeperGameplay {
     }
 
     public static void resetRoundState() {
+        TOTEM_READY_TICK.clear();
         RESPAWN_RELEASE_TICK.clear();
         INTERACTION_POSE_RELEASE_TICK.clear();
         INTERACTION_USE_RELEASE_TICK.clear();
@@ -129,7 +143,7 @@ public final class MinesweeperGameplay {
     }
 
     public static void handleDisarmResult(ServerPlayer player, DisarmResultPayload payload) {
-        if (!MinesweeperRoundManager.isActive()) {
+        if (!MinesweeperRoundManager.isActive() || !MinesweeperRoundManager.isParticipant(player)) {
             return;
         }
 
@@ -161,13 +175,19 @@ public final class MinesweeperGameplay {
             triggerMine(level, board, payload.cellPos());
         }
 
-        player.getCooldowns().addCooldown(MinesweeperItems.DESACTIVADOR_MINA.getDefaultInstance(), DESACTIVADOR_COOLDOWN_TICKS);
+        player.getCooldowns().addCooldown(MinesweeperItems.DESACTIVADOR_MINA.getDefaultInstance(), disablerCooldownTicks());
         MinesweeperBoardSync.broadcastBoardSnapshot(level, board);
     }
 
     private static InteractionResult onUseItem(Player player, Level level, InteractionHand hand) {
         if (level.isClientSide()) {
             return InteractionResult.PASS;
+        }
+        if (!MinesweeperRoundManager.isActive() || !(player instanceof ServerPlayer serverPlayer) || !MinesweeperRoundManager.isParticipant(serverPlayer)) {
+            return InteractionResult.PASS;
+        }
+        if (!MinesweeperSessionManager.isGameplayOpen()) {
+            return InteractionResult.FAIL;
         }
 
         ItemStack held = player.getItemInHand(hand);
@@ -181,6 +201,12 @@ public final class MinesweeperGameplay {
     private static InteractionResult onAttackBlock(Player player, Level level, InteractionHand hand, BlockPos pos, net.minecraft.core.Direction direction) {
         if (level.isClientSide()) {
             return InteractionResult.PASS;
+        }
+        if (!MinesweeperRoundManager.isActive() || !(player instanceof ServerPlayer serverPlayer) || !MinesweeperRoundManager.isParticipant(serverPlayer)) {
+            return InteractionResult.PASS;
+        }
+        if (!MinesweeperSessionManager.isGameplayOpen()) {
+            return InteractionResult.FAIL;
         }
 
         ItemStack held = player.getItemInHand(hand);
@@ -197,6 +223,13 @@ public final class MinesweeperGameplay {
 
         if (!MinesweeperRoundManager.isActive()) {
             return InteractionResult.PASS;
+        }
+        if (!MinesweeperRoundManager.isParticipant(serverPlayer)) {
+            return InteractionResult.PASS;
+        }
+        if (!MinesweeperSessionManager.isGameplayOpen()) {
+            serverPlayer.displayClientMessage(Component.literal("La partida aun no esta habilitada para jugar."), true);
+            return InteractionResult.FAIL;
         }
 
         ItemStack held = player.getItemInHand(hand);
@@ -292,7 +325,7 @@ public final class MinesweeperGameplay {
             int tick = level.getServer().getTickCount();
             int token = Math.floorMod((tick * 37) ^ cellPos.hashCode() ^ board.boardId(), Integer.MAX_VALUE);
 
-            PENDING_DISARMS.put(player.getUUID(), new PendingDisarm(board.boardId(), cellPos.immutable(), token, tick + DISARM_CHALLENGE_TIMEOUT_TICKS));
+            PENDING_DISARMS.put(player.getUUID(), new PendingDisarm(board.boardId(), cellPos.immutable(), token, tick + disarmChallengeTimeoutTicks()));
             ServerPlayNetworking.send(player, new OpenDisarmPayload(board.boardId(), cellPos.immutable(), token));
             player.displayClientMessage(Component.literal("Resuelve el minijuego para desactivar la mina."), true);
             return InteractionResult.SUCCESS;
@@ -306,7 +339,7 @@ public final class MinesweeperGameplay {
             triggerMine(level, board, cellPos);
         }
 
-        player.getCooldowns().addCooldown(held, DESACTIVADOR_COOLDOWN_TICKS);
+        player.getCooldowns().addCooldown(held, disablerCooldownTicks());
         MinesweeperBoardSync.broadcastBoardSnapshot(level, board);
         return InteractionResult.SUCCESS;
     }
@@ -351,19 +384,30 @@ public final class MinesweeperGameplay {
         }
 
         int tick = level.getServer().getTickCount();
+        MinesweeperSessionManager.tick(level.getServer(), tick);
+        if (!MinesweeperRoundManager.isActive()) {
+            return;
+        }
+        if (!MinesweeperSessionManager.isGameplayOpen()) {
+            return;
+        }
 
         clearExpiredDisarmChallenges(level, tick);
         processPendingMineTriggers(level, tick);
 
         if (tick % SNAPSHOT_SYNC_INTERVAL_TICKS == 0) {
             for (ServerPlayer player : level.players()) {
-                if (!player.isSpectator()) {
+                if (!player.isSpectator() && MinesweeperRoundManager.isParticipant(player)) {
                     MinesweeperBoardSync.sendBestSnapshot(player);
                 }
             }
         }
 
         for (ServerPlayer player : level.players()) {
+            if (!MinesweeperRoundManager.isParticipant(player)) {
+                continue;
+            }
+
             releaseRespawnIfReady(player, tick);
             releaseInteractionPoseIfReady(player, tick);
 
@@ -392,17 +436,25 @@ public final class MinesweeperGameplay {
     }
 
     private static void processPendingMineTriggers(ServerLevel level, int tick) {
-        Iterator<Map.Entry<UUID, PendingMineTrigger>> iterator = PENDING_MINE_TRIGGERS.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<UUID, PendingMineTrigger> entry = iterator.next();
+        List<Map.Entry<UUID, PendingMineTrigger>> snapshot = new ArrayList<>(PENDING_MINE_TRIGGERS.entrySet());
+        for (Map.Entry<UUID, PendingMineTrigger> entry : snapshot) {
+            UUID playerId = entry.getKey();
             PendingMineTrigger pending = entry.getValue();
+            if (PENDING_MINE_TRIGGERS.get(playerId) != pending) {
+                continue;
+            }
+
+            if (!MinesweeperRoundManager.isParticipant(playerId)) {
+                PENDING_MINE_TRIGGERS.remove(playerId, pending);
+                continue;
+            }
             if (tick < pending.triggerTick()) {
                 continue;
             }
 
             Optional<BoardData> boardOptional = MinesweeperBoardManager.getBoard(pending.boardId());
             if (boardOptional.isEmpty()) {
-                iterator.remove();
+                PENDING_MINE_TRIGGERS.remove(playerId, pending);
                 continue;
             }
 
@@ -411,17 +463,17 @@ public final class MinesweeperGameplay {
                 continue;
             }
 
+            PENDING_MINE_TRIGGERS.remove(playerId, pending);
+
             if (MinesweeperBoardManager.isDisarmed(board, pending.minePos())) {
                 MinesweeperBoardManager.showMineAsInactive(level, board, pending.minePos());
                 spawnInactiveMineFx(level, pending.minePos());
                 MinesweeperBoardSync.broadcastBoardSnapshot(level, board);
-                iterator.remove();
                 continue;
             }
 
             MinesweeperBoardManager.reveal(level, board, pending.minePos());
             triggerMine(level, board, pending.minePos());
-            iterator.remove();
         }
     }
 
@@ -434,16 +486,17 @@ public final class MinesweeperGameplay {
     ) {
         PendingMineTrigger current = PENDING_MINE_TRIGGERS.get(player.getUUID());
         if (current == null || current.boardId() != board.boardId() || !current.minePos().equals(minePos)) {
+            int triggerDelayTicks = mineTriggerDelayTicks();
             PENDING_MINE_TRIGGERS.put(
                     player.getUUID(),
-                    new PendingMineTrigger(board.boardId(), minePos.immutable(), tick + STEP_MINE_TRIGGER_DELAY_TICKS)
+                    new PendingMineTrigger(board.boardId(), minePos.immutable(), tick + triggerDelayTicks)
             );
             MinesweeperBoardManager.reveal(level, board, minePos);
             MinesweeperBoardSync.broadcastBoardSnapshot(level, board);
             player.displayClientMessage(Component.literal("Mina activada..."), true);
         }
 
-        player.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, STEP_MINE_TRIGGER_DELAY_TICKS + 4, 4, false, false, false));
+        player.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, mineTriggerDelayTicks() + 4, 4, false, false, false));
         player.setPose(Pose.CROUCHING);
         INTERACTION_POSE_RELEASE_TICK.remove(player.getUUID());
         INTERACTION_USE_RELEASE_TICK.remove(player.getUUID());
@@ -498,7 +551,10 @@ public final class MinesweeperGameplay {
             ServerPlayer player = level.getServer().getPlayerList().getPlayer(entry.getKey());
             if (player != null) {
                 player.displayClientMessage(Component.literal("Desactivacion cancelada por tiempo."), true);
-                player.getCooldowns().addCooldown(MinesweeperItems.DESACTIVADOR_MINA.getDefaultInstance(), DESACTIVADOR_COOLDOWN_TICKS / 2);
+                player.getCooldowns().addCooldown(
+                        MinesweeperItems.DESACTIVADOR_MINA.getDefaultInstance(),
+                        Math.max(1, disablerCooldownTicks() / 2)
+                );
             }
             iterator.remove();
         }
@@ -510,14 +566,14 @@ public final class MinesweeperGameplay {
             return;
         }
 
-        PlayerTeam team = player.getTeam();
-        if (team != null && ELIMINATED_TEAMS.contains(team.getName())) {
+        String teamKey = MinesweeperSessionManager.teamKeyForPlayer(player);
+        if ((teamKey != null && ELIMINATED_TEAMS.contains(teamKey)) || MinesweeperSessionManager.shouldForceSpectator(player)) {
             player.setGameMode(net.minecraft.world.level.GameType.SPECTATOR);
             RESPAWN_RELEASE_TICK.remove(player.getUUID());
             return;
         }
 
-        player.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
+        player.setGameMode(MinesweeperRoundManager.participantGameMode(player.getUUID()));
         player.displayClientMessage(Component.literal("Ya puedes volver a jugar."), false);
         RESPAWN_RELEASE_TICK.remove(player.getUUID());
     }
@@ -554,7 +610,9 @@ public final class MinesweeperGameplay {
                 animationKind.durationTicks()
         );
         for (ServerPlayer target : level.players()) {
-            ServerPlayNetworking.send(target, payload);
+            if (MinesweeperRoundManager.isParticipant(target)) {
+                ServerPlayNetworking.send(target, payload);
+            }
         }
     }
 
@@ -583,39 +641,39 @@ public final class MinesweeperGameplay {
                 EXPLOSION_GECKO_LIFE_TICKS
         );
         int tick = level.getServer().getTickCount();
-
-        level.explode(
-                null,
-                minePos.getX() + 0.5D,
-                minePos.getY() + 0.3D,
-                minePos.getZ() + 0.5D,
-                2.2F,
-                false,
-                Level.ExplosionInteraction.NONE
-        );
-        level.sendParticles(
-                ParticleTypes.EXPLOSION,
-                minePos.getX() + 0.5D,
-                minePos.getY() + 0.45D,
-                minePos.getZ() + 0.5D,
-                10,
-                0.25D,
-                0.1D,
-                0.25D,
-                0.01D
-        );
         double centerX = minePos.getX() + 0.5D;
         double centerY = minePos.getY() + 0.5D;
         double centerZ = minePos.getZ() + 0.5D;
 
+        level.explode(
+                null,
+                centerX,
+                minePos.getY() + 0.3D,
+                centerZ,
+                MINE_EXPLOSION_POWER,
+                false,
+                Level.ExplosionInteraction.NONE
+        );
+        spawnExplosionBurst(level, centerX, centerY, centerZ);
+
         for (ServerPlayer other : level.players()) {
-            if (other.isSpectator()) {
+            if (other.isSpectator() || !MinesweeperRoundManager.isParticipant(other)) {
                 continue;
             }
-            if (Math.abs(other.getX() - centerX) > 1.5D || Math.abs(other.getZ() - centerZ) > 1.5D || Math.abs(other.getY() - centerY) > 2.5D) {
+            double deltaX = other.getX() - centerX;
+            double deltaZ = other.getZ() - centerZ;
+            double horizontalDistanceSqr = (deltaX * deltaX) + (deltaZ * deltaZ);
+            if (horizontalDistanceSqr > MINE_EXPLOSION_RADIUS_SQR || Math.abs(other.getY() - centerY) > MINE_EXPLOSION_VERTICAL_REACH) {
                 continue;
             }
 
+            double distance = Math.sqrt(horizontalDistanceSqr);
+            double blastStrength = Math.max(0.0D, 1.0D - (distance / MINE_EXPLOSION_RADIUS));
+            if (blastStrength > 0.0D) {
+                double pushX = distance < 1.0E-4D ? 0.0D : (deltaX / distance) * (MINE_EXPLOSION_PUSH * blastStrength);
+                double pushZ = distance < 1.0E-4D ? 0.0D : (deltaZ / distance) * (MINE_EXPLOSION_PUSH * blastStrength);
+                other.push(pushX, 0.16D + (blastStrength * 0.24D), pushZ);
+            }
             other.animateHurt(0.0F);
             if (canUseTotem(other, tick)) {
                 consumeTotemCooldown(other, tick);
@@ -628,6 +686,15 @@ public final class MinesweeperGameplay {
 
         checkCompletion(level, board);
         MinesweeperBoardSync.broadcastBoardSnapshot(level, board);
+    }
+
+    private static void spawnExplosionBurst(ServerLevel level, double centerX, double centerY, double centerZ) {
+        level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY + 0.05D, centerZ, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+        level.sendParticles(ParticleTypes.EXPLOSION, centerX, centerY + 0.15D, centerZ, 12, 0.28D, 0.14D, 0.28D, 0.015D);
+        level.sendParticles(ParticleTypes.POOF, centerX, centerY + 0.12D, centerZ, 20, 0.36D, 0.18D, 0.36D, 0.06D);
+        level.sendParticles(ParticleTypes.LARGE_SMOKE, centerX, centerY + 0.18D, centerZ, 14, 0.34D, 0.16D, 0.34D, 0.02D);
+        level.sendParticles(ParticleTypes.SMOKE, centerX, centerY + 0.28D, centerZ, 24, 0.45D, 0.22D, 0.45D, 0.02D);
+        level.sendParticles(ParticleTypes.FLAME, centerX, centerY + 0.1D, centerZ, 10, 0.24D, 0.12D, 0.24D, 0.015D);
     }
 
     private static Optional<BoardCellTarget> resolveBoardCell(ServerLevel level, BlockPos clickedPos) {
@@ -657,6 +724,9 @@ public final class MinesweeperGameplay {
     }
 
     private static boolean canUseTotem(ServerPlayer player, int tick) {
+        if (!MinesweeperRoundManager.isParticipant(player)) {
+            return false;
+        }
         if (!player.getInventory().contains(stack -> stack.is(MinesweeperItems.TOTEM_INMORTALIDAD))) {
             return false;
         }
@@ -664,34 +734,41 @@ public final class MinesweeperGameplay {
     }
 
     private static void consumeTotemCooldown(ServerPlayer player, int tick) {
-        TOTEM_READY_TICK.put(player.getUUID(), tick + TOTEM_COOLDOWN_TICKS);
+        TOTEM_READY_TICK.put(player.getUUID(), tick + totemCooldownTicks());
     }
 
     private static void checkCompletion(ServerLevel level, BoardData board) {
         if (!MinesweeperBoardManager.isCompleted(board)) {
             return;
         }
+        if (MinesweeperSessionManager.handleBoardCompletion(level, board)) {
+            return;
+        }
 
         Component message = Component.literal("Tablero #" + board.boardId() + " completado.");
         for (ServerPlayer player : level.players()) {
-            player.displayClientMessage(message, false);
+            if (MinesweeperRoundManager.isParticipant(player)) {
+                player.displayClientMessage(message, false);
+            }
         }
     }
 
     private static void evaluateTeamElimination(ServerPlayer deadPlayer) {
-        if (deadPlayer.level().getServer() == null || !MinesweeperRoundManager.isActive()) {
+        if (deadPlayer.level().getServer() == null || !MinesweeperRoundManager.isActive() || !MinesweeperRoundManager.isParticipant(deadPlayer)) {
             return;
         }
 
-        PlayerTeam team = deadPlayer.getTeam();
-        if (team == null || ELIMINATED_TEAMS.contains(team.getName())) {
+        String teamKey = MinesweeperSessionManager.teamKeyForPlayer(deadPlayer);
+        if (teamKey == null || ELIMINATED_TEAMS.contains(teamKey)) {
             return;
         }
 
         boolean anyoneAlive = false;
         for (ServerPlayer player : deadPlayer.level().getServer().getPlayerList().getPlayers()) {
-            PlayerTeam otherTeam = player.getTeam();
-            if (otherTeam == null || !otherTeam.getName().equals(team.getName())) {
+            if (!MinesweeperRoundManager.isParticipant(player)) {
+                continue;
+            }
+            if (!MinesweeperSessionManager.isSameTeam(player, teamKey)) {
                 continue;
             }
 
@@ -703,19 +780,49 @@ public final class MinesweeperGameplay {
         }
 
         if (!anyoneAlive) {
-            ELIMINATED_TEAMS.add(team.getName());
+            ELIMINATED_TEAMS.add(teamKey);
             for (ServerPlayer player : deadPlayer.level().getServer().getPlayerList().getPlayers()) {
-                PlayerTeam otherTeam = player.getTeam();
-                if (otherTeam != null && otherTeam.getName().equals(team.getName())) {
+                if (!MinesweeperRoundManager.isParticipant(player)) {
+                    continue;
+                }
+                if (MinesweeperSessionManager.isSameTeam(player, teamKey)) {
                     player.setGameMode(net.minecraft.world.level.GameType.SPECTATOR);
                     player.displayClientMessage(Component.literal("Tu equipo fue eliminado."), false);
                 }
             }
+            MinesweeperSessionManager.handleTeamEliminated(deadPlayer.level().getServer(), teamKey);
         }
     }
 
     private static long inactiveMineKey(int boardId, BlockPos minePos) {
         return (minePos.asLong() * 31L) ^ (boardId * 1_000_003L);
+    }
+
+    private static int mineTriggerDelayTicks() {
+        return MinesweeperRoundManager.activeSettings().mineTriggerDelayTicks();
+    }
+
+    private static int respawnWaitTicks() {
+        return MinesweeperRoundManager.activeSettings().respawnWaitTicks();
+    }
+
+    private static int disarmChallengeTimeoutTicks() {
+        return MinesweeperRoundManager.activeSettings().disarmTimeoutTicks();
+    }
+
+    private static int disablerCooldownTicks() {
+        return MinesweeperRoundManager.activeSettings().disablerCooldownTicks();
+    }
+
+    private static int totemCooldownTicks() {
+        return MinesweeperRoundManager.activeSettings().totemCooldownTicks();
+    }
+
+    private static String formatSeconds(int ticks) {
+        if (ticks % 20 == 0) {
+            return Integer.toString(ticks / 20);
+        }
+        return String.format(java.util.Locale.ROOT, "%.1f", ticks / 20.0D);
     }
 
     private enum PlayerInteractionAnimation {

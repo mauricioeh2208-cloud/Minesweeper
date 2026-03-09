@@ -19,6 +19,9 @@ public final class MinesweeperBoardSync {
         if (!(player.level() instanceof ServerLevel level)) {
             return;
         }
+        if (MinesweeperRoundManager.isActive() && !MinesweeperRoundManager.isParticipant(player)) {
+            return;
+        }
 
         Optional<BoardData> boardOptional;
         if (payload.boardId() > 0) {
@@ -32,21 +35,29 @@ public final class MinesweeperBoardSync {
     }
 
     public static void sendBestSnapshot(ServerPlayer player) {
+        if (MinesweeperRoundManager.isActive() && !MinesweeperRoundManager.isParticipant(player)) {
+            return;
+        }
         findBestBoard(player).ifPresent(board -> sendSnapshot(player, board));
     }
 
     public static void broadcastBoardSnapshot(ServerLevel level, BoardData board) {
         for (ServerPlayer player : level.players()) {
-            if (player.level().dimension().equals(board.dimension())) {
+            if (MinesweeperRoundManager.isParticipant(player)) {
                 sendSnapshot(player, board);
             }
         }
     }
 
     private static void sendSnapshot(ServerPlayer player, BoardData board) {
+        ServerPlayer focusPlayer = MinesweeperSessionManager.resolveBoardFocusPlayer(player);
+        if (!(focusPlayer.level() instanceof ServerLevel focusLevel) || !focusLevel.dimension().equals(board.dimension())) {
+            return;
+        }
+
         byte[] cells = buildCells(board);
-        int localX = player.blockPosition().getX() - board.origin().getX();
-        int localZ = player.blockPosition().getZ() - board.origin().getZ();
+        int localX = focusPlayer.blockPosition().getX() - board.origin().getX();
+        int localZ = focusPlayer.blockPosition().getZ() - board.origin().getZ();
         if (localX < 0 || localZ < 0 || localX >= board.width() || localZ >= board.height()) {
             localX = -1;
             localZ = -1;
@@ -64,11 +75,12 @@ public final class MinesweeperBoardSync {
     }
 
     private static Optional<BoardData> findBestBoard(ServerPlayer player) {
-        if (!(player.level() instanceof ServerLevel level)) {
+        ServerPlayer focusPlayer = MinesweeperSessionManager.resolveBoardFocusPlayer(player);
+        if (!(focusPlayer.level() instanceof ServerLevel level)) {
             return Optional.empty();
         }
 
-        Optional<BoardData> direct = MinesweeperBoardManager.getBoardAt(level, player.blockPosition());
+        Optional<BoardData> direct = MinesweeperBoardManager.getBoardAt(level, focusPlayer.blockPosition());
         if (direct.isPresent()) {
             return direct;
         }
@@ -83,8 +95,8 @@ public final class MinesweeperBoardSync {
         for (BoardData board : boards) {
             double centerX = board.origin().getX() + (board.width() * 0.5D);
             double centerZ = board.origin().getZ() + (board.height() * 0.5D);
-            double dx = player.getX() - centerX;
-            double dz = player.getZ() - centerZ;
+            double dx = focusPlayer.getX() - centerX;
+            double dz = focusPlayer.getZ() - centerZ;
             double dist = (dx * dx) + (dz * dz);
             if (dist < bestDist) {
                 bestDist = dist;

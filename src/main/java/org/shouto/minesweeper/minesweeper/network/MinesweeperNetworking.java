@@ -33,7 +33,9 @@ public final class MinesweeperNetworking {
         );
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-            sender.sendPacket(new RoundStatePayload(MinesweeperRoundManager.isActive()));
+            sender.sendPacket(new RoundStatePayload(
+                    MinesweeperRoundManager.isActive() && MinesweeperRoundManager.isParticipant(handler.player)
+            ));
             MinesweeperBoardSync.sendBestSnapshot(handler.player);
         });
     }
