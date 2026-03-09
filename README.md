@@ -2,7 +2,7 @@
 
 Manual de uso para operadores (`OP`) del mod de Buscaminas en Fabric `1.21.11`.
 
-Este documento describe el comportamiento actual del mod en el repositorio. Si algo cambia en código, el manual debe actualizarse.
+Este documento describe el comportamiento actual del mod en el repositorio. Si algo cambia en código, el manual lo actualizare.
 
 ## Resumen
 
