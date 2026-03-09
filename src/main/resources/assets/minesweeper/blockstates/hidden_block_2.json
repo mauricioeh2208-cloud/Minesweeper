@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "minesweeper:block/hidden_block_2"
+    }
+  }
+}

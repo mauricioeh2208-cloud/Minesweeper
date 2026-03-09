@@ -1,0 +1,397 @@
+package org.shouto.minesweeper.minesweeper.game;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import org.shouto.minesweeper.minesweeper.registry.MinesweeperBlocks;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Queue;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public final class MinesweeperBoardManager {
+    private static final Map<Integer, BoardData> BOARDS = new HashMap<>();
+    private static final AtomicInteger NEXT_BOARD_ID = new AtomicInteger(1);
+
+    private MinesweeperBoardManager() {
+    }
+
+    public static CreateBoardResult createBoard(ServerLevel level, BlockPos origin, int width, int height, int requestedMines) {
+        int totalCells = width * height;
+        int mineCount = Math.min(requestedMines, totalCells);
+
+        Map<BlockPos, BlockState> snapshot = new HashMap<>();
+        for (int x = -1; x <= width; x++) {
+            for (int z = -1; z <= height; z++) {
+                BlockPos groundPos = origin.offset(x, 0, z);
+                boolean border = x == -1 || z == -1 || x == width || z == height;
+                BlockState groundState = border
+                        ? Blocks.QUARTZ_BLOCK.defaultBlockState()
+                        : (((x + z) & 1) == 0
+                        ? MinesweeperBlocks.HIDDEN_BLOCK_1.defaultBlockState()
+                        : MinesweeperBlocks.HIDDEN_BLOCK_2.defaultBlockState());
+                captureAndSet(level, snapshot, groundPos, groundState);
+                captureAndSet(level, snapshot, groundPos.above(), Blocks.AIR.defaultBlockState());
+            }
+        }
+
+        BlockPos cratePos = origin.offset(width + 2, 0, Math.max(0, height / 2));
+        captureAndSet(level, snapshot, cratePos, MinesweeperBlocks.FLAG_CRATE_BLOCK.defaultBlockState());
+        captureAndSet(level, snapshot, cratePos.above(), Blocks.AIR.defaultBlockState());
+
+        List<Long> slots = new ArrayList<>(totalCells);
+        for (int x = 0; x < width; x++) {
+            for (int z = 0; z < height; z++) {
+                slots.add(packLocal(x, z));
+            }
+        }
+        Collections.shuffle(slots, new Random(level.getSeed() ^ origin.asLong() ^ System.nanoTime()));
+
+        Set<Long> mines = new HashSet<>(mineCount);
+        for (int i = 0; i < mineCount; i++) {
+            mines.add(slots.get(i));
+        }
+
+        int boardId = NEXT_BOARD_ID.getAndIncrement();
+        BoardData board = new BoardData(
+                boardId,
+                level.dimension(),
+                origin.immutable(),
+                width,
+                height,
+                mineCount,
+                mines,
+                new HashSet<>(),
+                new HashSet<>(),
+                new HashSet<>(),
+                snapshot
+        );
+        BOARDS.put(boardId, board);
+
+        // Minas invisibles con hitbox tipo placa por encima de cada casilla.
+        for (long local : mines) {
+            int localX = localX(local);
+            int localZ = localZ(local);
+            BlockPos markerPos = origin.offset(localX, 0, localZ).above();
+            capture(board, level, markerPos);
+            level.setBlock(markerPos, MinesweeperBlocks.MINE_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        }
+
+        return new CreateBoardResult(boardId, totalCells, requestedMines, mineCount, cratePos);
+    }
+
+    public static boolean deleteBoard(MinecraftServer server, int boardId) {
+        BoardData board = BOARDS.remove(boardId);
+        if (board == null) {
+            return false;
+        }
+        ServerLevel level = server.getLevel(board.dimension());
+        if (level == null) {
+            return false;
+        }
+
+        for (Map.Entry<BlockPos, BlockState> entry : board.snapshot().entrySet()) {
+            level.setBlock(entry.getKey(), entry.getValue(), Block.UPDATE_ALL);
+        }
+        return true;
+    }
+
+    public static Optional<BoardData> getBoard(int boardId) {
+        return Optional.ofNullable(BOARDS.get(boardId));
+    }
+
+    public static List<BoardData> getBoardsInDimension(ResourceKey<Level> dimension) {
+        List<BoardData> result = new ArrayList<>();
+        for (BoardData board : BOARDS.values()) {
+            if (board.dimension().equals(dimension)) {
+                result.add(board);
+            }
+        }
+        return result;
+    }
+
+    public static Optional<BoardData> getBoardAt(ServerLevel level, BlockPos pos) {
+        for (BoardData board : BOARDS.values()) {
+            if (!board.dimension().equals(level.dimension())) {
+                continue;
+            }
+            if (isInside(board, pos)) {
+                return Optional.of(board);
+            }
+        }
+        return Optional.empty();
+    }
+
+    public static boolean isInside(BoardData board, BlockPos pos) {
+        int x = pos.getX() - board.origin().getX();
+        int z = pos.getZ() - board.origin().getZ();
+        return pos.getY() == board.origin().getY() && x >= 0 && z >= 0 && x < board.width() && z < board.height();
+    }
+
+    public static boolean isMine(BoardData board, BlockPos cellPos) {
+        long local = toLocal(board, cellPos);
+        return board.mines().contains(local);
+    }
+
+    public static boolean isDisarmed(BoardData board, BlockPos cellPos) {
+        long local = toLocal(board, cellPos);
+        return board.disarmedMines().contains(local);
+    }
+
+    public static boolean isFlagged(BoardData board, BlockPos cellPos) {
+        return board.flagged().contains(toLocal(board, cellPos));
+    }
+
+    public static boolean isRevealed(BoardData board, BlockPos cellPos) {
+        return board.revealed().contains(toLocal(board, cellPos));
+    }
+
+    public static int getAdjacentMines(BoardData board, BlockPos cellPos) {
+        int count = 0;
+        int localX = cellPos.getX() - board.origin().getX();
+        int localZ = cellPos.getZ() - board.origin().getZ();
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                int nx = localX + dx;
+                int nz = localZ + dz;
+                if (nx < 0 || nz < 0 || nx >= board.width() || nz >= board.height()) {
+                    continue;
+                }
+                if (board.mines().contains(packLocal(nx, nz))) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    public static RevealResult reveal(ServerLevel level, BoardData board, BlockPos cellPos) {
+        if (!isInside(board, cellPos)) {
+            return RevealResult.OUTSIDE;
+        }
+
+        long local = toLocal(board, cellPos);
+        if (board.revealed().contains(local)) {
+            return RevealResult.ALREADY_REVEALED;
+        }
+
+        if (board.flagged().contains(local)) {
+            return RevealResult.FLAGGED;
+        }
+
+        if (board.mines().contains(local)) {
+            board.revealed().add(local);
+            revealMine(level, board, cellPos);
+            return RevealResult.MINE;
+        }
+
+        floodReveal(level, board, cellPos);
+        return RevealResult.NUMBER;
+    }
+
+    public static boolean disarmMine(ServerLevel level, BoardData board, BlockPos cellPos) {
+        if (!isInside(board, cellPos)) {
+            return false;
+        }
+
+        long local = toLocal(board, cellPos);
+        if (!board.mines().contains(local)) {
+            return false;
+        }
+
+        board.disarmedMines().add(local);
+        board.flagged().add(local);
+        capture(board, level, cellPos);
+        level.setBlock(cellPos, MinesweeperBlocks.MINE_OPEN_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos markerPos = cellPos.above();
+        capture(board, level, markerPos);
+        level.setBlock(markerPos, MinesweeperBlocks.FLAG_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        return true;
+    }
+
+    public static void showMineAsInactive(ServerLevel level, BoardData board, BlockPos cellPos) {
+        if (!isInside(board, cellPos)) {
+            return;
+        }
+        if (!isMine(board, cellPos)) {
+            return;
+        }
+
+        capture(board, level, cellPos);
+        level.setBlock(cellPos, MinesweeperBlocks.MINE_OPEN_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+    }
+
+    public static boolean placeFlag(ServerLevel level, BoardData board, BlockPos cellPos) {
+        if (!isInside(board, cellPos)) {
+            return false;
+        }
+
+        long local = toLocal(board, cellPos);
+        if (board.flagged().contains(local)) {
+            return false;
+        }
+
+        BlockPos markerPos = cellPos.above();
+        BlockState markerState = level.getBlockState(markerPos);
+        if (!markerState.isAir() && markerState.getBlock() != MinesweeperBlocks.MINE_BLOCK) {
+            return false;
+        }
+
+        board.flagged().add(local);
+        capture(board, level, markerPos);
+        level.setBlock(markerPos, MinesweeperBlocks.FLAG_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        return true;
+    }
+
+    public static boolean removeFlag(ServerLevel level, BoardData board, BlockPos cellPos) {
+        if (!isInside(board, cellPos)) {
+            return false;
+        }
+
+        long local = toLocal(board, cellPos);
+        if (!board.flagged().remove(local)) {
+            return false;
+        }
+
+        BlockPos markerPos = cellPos.above();
+        capture(board, level, markerPos);
+        BlockState restoredState = (board.mines().contains(local) && !board.disarmedMines().contains(local))
+                ? MinesweeperBlocks.MINE_BLOCK.defaultBlockState()
+                : Blocks.AIR.defaultBlockState();
+        level.setBlock(markerPos, restoredState, Block.UPDATE_ALL);
+        return true;
+    }
+
+    public static boolean isCompleted(BoardData board) {
+        if (board.flagged().isEmpty()) {
+            return false;
+        }
+        if (board.flagged().size() != board.mines().size()) {
+            return false;
+        }
+
+        for (long flagged : board.flagged()) {
+            if (!board.mines().contains(flagged)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void floodReveal(ServerLevel level, BoardData board, BlockPos startPos) {
+        Queue<BlockPos> queue = new ArrayDeque<>();
+        queue.add(startPos.immutable());
+
+        while (!queue.isEmpty()) {
+            BlockPos current = queue.remove();
+            if (!isInside(board, current)) {
+                continue;
+            }
+
+            long local = toLocal(board, current);
+            if (board.revealed().contains(local) || board.flagged().contains(local) || board.mines().contains(local)) {
+                continue;
+            }
+
+            board.revealed().add(local);
+            int adjacent = getAdjacentMines(board, current);
+            Block numberBlock = MinesweeperBlocks.NUMBER_BLOCKS[Math.min(5, adjacent)];
+            capture(board, level, current);
+            level.setBlock(current, numberBlock.defaultBlockState(), Block.UPDATE_ALL);
+
+            if (adjacent == 0) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dz == 0) {
+                            continue;
+                        }
+                        queue.add(current.offset(dx, 0, dz));
+                    }
+                }
+            }
+        }
+    }
+
+    private static void revealMine(ServerLevel level, BoardData board, BlockPos cellPos) {
+        BlockPos markerPos = cellPos.above();
+        capture(board, level, markerPos);
+        level.setBlock(markerPos, MinesweeperBlocks.MINE_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+    }
+
+    private static void capture(BoardData board, ServerLevel level, BlockPos pos) {
+        BlockPos immutable = pos.immutable();
+        board.snapshot().putIfAbsent(immutable, level.getBlockState(immutable));
+    }
+
+    private static void captureAndSet(ServerLevel level, Map<BlockPos, BlockState> snapshot, BlockPos pos, BlockState newState) {
+        BlockPos immutable = pos.immutable();
+        snapshot.putIfAbsent(immutable, level.getBlockState(immutable));
+        level.setBlock(immutable, newState, Block.UPDATE_ALL);
+    }
+
+    private static long toLocal(BoardData board, BlockPos worldPos) {
+        return packLocal(worldPos.getX() - board.origin().getX(), worldPos.getZ() - board.origin().getZ());
+    }
+
+    private static long packLocal(int x, int z) {
+        return ((long) x << 32) ^ (z & 0xffffffffL);
+    }
+
+    private static int localX(long packed) {
+        return (int) (packed >> 32);
+    }
+
+    private static int localZ(long packed) {
+        return (int) packed;
+    }
+
+    public enum RevealResult {
+        OUTSIDE,
+        ALREADY_REVEALED,
+        FLAGGED,
+        NUMBER,
+        MINE
+    }
+
+    public record CreateBoardResult(
+            int boardId,
+            int totalCells,
+            int requestedMines,
+            int placedMines,
+            BlockPos flagCratePosition
+    ) {
+    }
+
+    public record BoardData(
+            int boardId,
+            ResourceKey<Level> dimension,
+            BlockPos origin,
+            int width,
+            int height,
+            int mineCount,
+            Set<Long> mines,
+            Set<Long> disarmedMines,
+            Set<Long> revealed,
+            Set<Long> flagged,
+            Map<BlockPos, BlockState> snapshot
+    ) {
+    }
+}

@@ -1,0 +1,33 @@
+{
+  "ambientocclusion": false,
+  "textures": {
+    "fx": "minesweeper:block/explosion",
+    "particle": "minesweeper:block/explosion"
+  },
+  "elements": [
+    {
+      "from": [0.0, 0.0, 7.9],
+      "to": [16.0, 16.0, 8.1],
+      "faces": {
+        "north": {"uv": [0.0, 0.0, 16.0, 16.0], "texture": "#fx"},
+        "south": {"uv": [0.0, 0.0, 16.0, 16.0], "texture": "#fx"}
+      }
+    },
+    {
+      "from": [7.9, 0.0, 0.0],
+      "to": [8.1, 16.0, 16.0],
+      "faces": {
+        "west": {"uv": [0.0, 0.0, 16.0, 16.0], "texture": "#fx"},
+        "east": {"uv": [0.0, 0.0, 16.0, 16.0], "texture": "#fx"}
+      }
+    },
+    {
+      "from": [0.0, 7.9, 0.0],
+      "to": [16.0, 8.1, 16.0],
+      "faces": {
+        "up": {"uv": [0.0, 0.0, 16.0, 16.0], "texture": "#fx"},
+        "down": {"uv": [0.0, 0.0, 16.0, 16.0], "texture": "#fx"}
+      }
+    }
+  ]
+}

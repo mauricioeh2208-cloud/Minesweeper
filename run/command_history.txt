@@ -1,0 +1,50 @@
+/buscaminas test_explosion_animacion 10
+/buscaminas test_explosion_animacion 100
+/buscaminas test_explosion_animacion 50
+/buscaminas test_explosion_animacion 60
+/buscaminas test_explosion_animacion 160
+/buscaminas test_explosion_animacion 20
+/buscaminas test_explosion_animacion 5
+/buscaminas test_explosion_animacion 20
+/buscaminas test_explosion_animacion
+/buscaminas test_explosion_animacion 40
+/buscaminas test_explosion_animacion 10
+/buscaminas test_explosion_animacion 40
+/buscaminas test_explosion_animacion 10
+/buscaminas test_explosion_animacion 50
+/buscaminas test_explosion_animacion 160
+/buscaminas test_explosion_animacion
+/buscaminas test_explosion_animacion 30
+/buscaminas test_explosion_animacion 5
+/buscaminas test_explosion_animacion 10
+/buscaminas test_explosion_animacion 15
+/buscaminas test_explosion_animacion 25
+/buscaminas test_explosion_animacion
+/weather clear
+/buscaminas test_explosion_animacion
+/buscaminas test_explosion_animacion 45
+/buscaminas test_explosion_animacion 39
+/time set day
+/buscaminas crear_tablero 30 4 15
+/buscaminas iniciar_ronda
+/time set day
+/buscaminas crear_tablero 30 5 15 ~ ~ ~
+/buscaminas iniciar_ronda
+/gamemode creative
+/buscaminas crear_tablero 30 5 15 ~ ~ ~
+/buscaminas iniciar_ronda
+/gamemode survival
+/gamemode creative
+/time set day
+/buscaminas crear_tablero 30 4 10 ~ ~ ~
+/buscaminas iniciar_ronda
+/time set day
+/buscaminas crear_tablero 40 5 10 ~ ~ ~
+/buscaminas iniciar_ronda
+/time set day
+/buscaminas crear_tablero 40 6 15 ~ ~ ~
+/buscaminas iniciar_ronda
+/buscaminas borrar_tablero 1
+/buscaminas crear_tablero 40 6 15 ~ ~ ~
+/buscaminas borrar_tablero 1
+/buscaminas borrar_tablero 2

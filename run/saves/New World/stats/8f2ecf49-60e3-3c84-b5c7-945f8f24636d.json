@@ -1,0 +1,29 @@
+{
+  "stats": {
+    "minecraft:custom": {
+      "minecraft:time_since_rest": 5572,
+      "minecraft:walk_one_cm": 9548,
+      "minecraft:total_world_time": 6667,
+      "minecraft:play_time": 5572,
+      "minecraft:jump": 5,
+      "minecraft:time_since_death": 5572,
+      "minecraft:drop": 1
+    },
+    "minecraft:used": {
+      "minesweeper:hidden_block_2": 1,
+      "minesweeper:number_block_1": 1,
+      "minesweeper:hidden_block_1": 1,
+      "minesweeper:number_block_0": 1,
+      "minesweeper:flag_crate_block": 1,
+      "minesweeper:flag_block": 2,
+      "minesweeper:mine_block": 1
+    },
+    "minecraft:picked_up": {
+      "minesweeper:interaccion": 1
+    },
+    "minecraft:dropped": {
+      "minesweeper:interaccion": 1
+    }
+  },
+  "DataVersion": 4671
+}

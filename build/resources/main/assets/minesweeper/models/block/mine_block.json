@@ -1,0 +1,81 @@
+{
+  "ambientocclusion": false,
+  "textures": {
+    "mine": "minecraft:block/oxidized_copper",
+    "particle": "minecraft:block/oxidized_copper"
+  },
+  "elements": [
+    {
+      "from": [3, 0, 3],
+      "to": [13, 2, 13],
+      "faces": {
+        "north": {"uv": [3, 14, 13, 16], "texture": "#mine"},
+        "east": {"uv": [3, 14, 13, 16], "texture": "#mine"},
+        "south": {"uv": [3, 14, 13, 16], "texture": "#mine"},
+        "west": {"uv": [3, 14, 13, 16], "texture": "#mine"},
+        "up": {"uv": [3, 3, 13, 13], "texture": "#mine"},
+        "down": {"uv": [3, 3, 13, 13], "texture": "#mine"}
+      }
+    },
+    {
+      "from": [5, 2, 5],
+      "to": [11, 3, 11],
+      "faces": {
+        "north": {"uv": [5, 13, 11, 14], "texture": "#mine"},
+        "east": {"uv": [5, 13, 11, 14], "texture": "#mine"},
+        "south": {"uv": [5, 13, 11, 14], "texture": "#mine"},
+        "west": {"uv": [5, 13, 11, 14], "texture": "#mine"},
+        "up": {"uv": [5, 5, 11, 11], "texture": "#mine"},
+        "down": {"uv": [5, 5, 11, 11], "texture": "#mine"}
+      }
+    },
+    {
+      "from": [6, 3, 6],
+      "to": [10, 4, 10],
+      "faces": {
+        "north": {"uv": [6, 12, 10, 13], "texture": "#mine"},
+        "east": {"uv": [6, 12, 10, 13], "texture": "#mine"},
+        "south": {"uv": [6, 12, 10, 13], "texture": "#mine"},
+        "west": {"uv": [6, 12, 10, 13], "texture": "#mine"},
+        "up": {"uv": [6, 6, 10, 10], "texture": "#mine"},
+        "down": {"uv": [6, 6, 10, 10], "texture": "#mine"}
+      }
+    },
+    {
+      "from": [5, 0, 1],
+      "to": [11, 2, 4],
+      "faces": {
+        "north": {"uv": [5, 14, 11, 16], "texture": "#mine"},
+        "east": {"uv": [5, 14, 8, 16], "texture": "#mine"},
+        "south": {"uv": [5, 14, 11, 16], "texture": "#mine"},
+        "west": {"uv": [5, 14, 8, 16], "texture": "#mine"},
+        "up": {"uv": [5, 1, 11, 4], "texture": "#mine"},
+        "down": {"uv": [5, 1, 11, 4], "texture": "#mine"}
+      }
+    },
+    {
+      "from": [1, 0, 5],
+      "to": [4, 2, 11],
+      "faces": {
+        "north": {"uv": [1, 14, 4, 16], "texture": "#mine"},
+        "east": {"uv": [5, 14, 11, 16], "texture": "#mine"},
+        "south": {"uv": [1, 14, 4, 16], "texture": "#mine"},
+        "west": {"uv": [5, 14, 11, 16], "texture": "#mine"},
+        "up": {"uv": [1, 5, 4, 11], "texture": "#mine"},
+        "down": {"uv": [1, 5, 4, 11], "texture": "#mine"}
+      }
+    },
+    {
+      "from": [12, 0, 5],
+      "to": [15, 2, 11],
+      "faces": {
+        "north": {"uv": [12, 14, 15, 16], "texture": "#mine"},
+        "east": {"uv": [5, 14, 11, 16], "texture": "#mine"},
+        "south": {"uv": [12, 14, 15, 16], "texture": "#mine"},
+        "west": {"uv": [5, 14, 11, 16], "texture": "#mine"},
+        "up": {"uv": [12, 5, 15, 11], "texture": "#mine"},
+        "down": {"uv": [12, 5, 15, 11], "texture": "#mine"}
+      }
+    }
+  ]
+}

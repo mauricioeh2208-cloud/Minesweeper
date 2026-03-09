@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "minesweeper:block/number_block_5"
+    }
+  }
+}

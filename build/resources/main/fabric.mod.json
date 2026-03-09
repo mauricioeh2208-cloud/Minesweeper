@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "minesweeper",
+  "version": "1.0-SNAPSHOT",
+  "name": "Minesweeper",
+  "description": "This mod is created for ShoutoGaming for THE server de SV STUDIOS",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/minesweeper/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.shouto.minesweeper.minesweeper.client.MinesweeperDataGenerator"
+    ],
+    "client": [
+      "org.shouto.minesweeper.minesweeper.client.MinesweeperClient"
+    ],
+    "main": [
+      "org.shouto.minesweeper.minesweeper.Minesweeper"
+    ]
+  },
+  "mixins": [
+    "minesweeper.mixins.json",
+    {
+      "config": "minesweeper.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "fabric-api": "*",
+    "geckolib": "*",
+    "minecraft": "1.21.11"
+  }
+}

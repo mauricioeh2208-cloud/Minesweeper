@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "minesweeper:block/mine_open_block"
+    }
+  }
+}

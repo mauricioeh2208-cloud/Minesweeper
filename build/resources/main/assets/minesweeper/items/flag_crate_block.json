@@ -1,0 +1,7 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "minesweeper:item/flag_crate_block"
+  }
+}
+

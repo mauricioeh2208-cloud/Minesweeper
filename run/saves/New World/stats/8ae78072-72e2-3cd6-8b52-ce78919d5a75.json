@@ -1,0 +1,26 @@
+{
+  "stats": {
+    "minecraft:mined": {
+      "minesweeper:flag_crate_block": 1
+    },
+    "minecraft:custom": {
+      "minecraft:sprint_one_cm": 3792,
+      "minecraft:time_since_rest": 12000,
+      "minecraft:walk_one_cm": 27936,
+      "minecraft:total_world_time": 12000,
+      "minecraft:fly_one_cm": 6158,
+      "minecraft:walk_under_water_one_cm": 575,
+      "minecraft:walk_on_water_one_cm": 233,
+      "minecraft:crouch_one_cm": 263,
+      "minecraft:sneak_time": 78,
+      "minecraft:play_time": 12000,
+      "minecraft:jump": 8,
+      "minecraft:time_since_death": 12000
+    },
+    "minecraft:used": {
+      "minesweeper:flag_crate_block": 1,
+      "minesweeper:flag_block": 6
+    }
+  },
+  "DataVersion": 4671
+}
