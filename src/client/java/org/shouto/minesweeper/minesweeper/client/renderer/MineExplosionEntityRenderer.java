@@ -8,12 +8,16 @@ import software.bernie.geckolib.animatable.manager.AnimatableManager;
 import software.bernie.geckolib.constant.DataTickets;
 import software.bernie.geckolib.constant.dataticket.DataTicket;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
+import software.bernie.geckolib.renderer.base.BoneSnapshots;
 import software.bernie.geckolib.renderer.base.GeoRenderState;
+import software.bernie.geckolib.renderer.base.RenderPassInfo;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class MineExplosionEntityRenderer extends GeoEntityRenderer<MineExplosionEntity, MineExplosionEntityRenderer.MineExplosionRenderState> {
+    private static final int FRAME_COUNT = 8;
+
     public MineExplosionEntityRenderer(EntityRendererProvider.Context context) {
         super(context, new MineExplosionGeoModel());
         this.shadowRadius = 0.0F;
@@ -34,11 +38,51 @@ public class MineExplosionEntityRenderer extends GeoEntityRenderer<MineExplosion
     ) {
         super.captureDefaultRenderState(animatable, relatedObject, renderState, partialTick);
 
-        // GeckoLib 5.4.1 puede dejar ANIMATABLE_MANAGER en null para esta entidad MISC.
-        // Forzamos manager + tiempo de entidad para evitar crash y mantener animacion progresiva.
         renderState.addGeckolibData(DataTickets.ANIMATABLE_MANAGER, animatable.getOrCreateFallbackManager());
         renderState.addGeckolibData(DataTickets.ANIMATABLE_INSTANCE_ID, getInstanceId(animatable, relatedObject));
         renderState.addGeckolibData(DataTickets.TICK, (double) animatable.tickCount + partialTick);
+    }
+
+    @Override
+    public void addRenderData(
+            MineExplosionEntity animatable,
+            Void relatedObject,
+            MineExplosionRenderState renderState,
+            float partialTick
+    ) {
+        long instanceId = getInstanceId(animatable, relatedObject);
+
+        renderState.addGeckolibData(
+                DataTickets.ANIMATABLE_MANAGER,
+                animatable.getAnimatableInstanceCache().getManagerForId(instanceId)
+        );
+        renderState.addGeckolibData(DataTickets.ANIMATABLE_INSTANCE_ID, instanceId);
+        renderState.addGeckolibData(DataTickets.PARTIAL_TICK, partialTick);
+        renderState.addGeckolibData(DataTickets.TICK, (double) animatable.tickCount + partialTick);
+    }
+
+    @Override
+    public void adjustModelBonesForRender(
+            RenderPassInfo<MineExplosionRenderState> renderPassInfo,
+            BoneSnapshots snapshots
+    ) {
+        int visibleFrame = getVisibleFrame(renderPassInfo.renderState().getAnimatableAge());
+
+        for (int frameIndex = 1; frameIndex <= FRAME_COUNT; frameIndex++) {
+            boolean visible = frameIndex == visibleFrame;
+
+            snapshots.ifPresent("frame_" + frameIndex, snapshot -> snapshot
+                    .skipRender(!visible)
+                    .skipChildrenRender(!visible)
+                    .setScale(1.0F, 1.0F, 1.0F));
+        }
+    }
+
+    private static int getVisibleFrame(double animationAge) {
+        double clampedAge = Math.max(0.0D, Math.min(MineExplosionEntity.ANIMATION_DURATION_TICKS - 0.001D, animationAge));
+        double progress = clampedAge / MineExplosionEntity.ANIMATION_DURATION_TICKS;
+
+        return Math.min(FRAME_COUNT, (int) (progress * FRAME_COUNT) + 1);
     }
 
     public static final class MineExplosionRenderState extends EntityRenderState implements GeoRenderState {
@@ -62,8 +106,7 @@ public class MineExplosionEntityRenderer extends GeoEntityRenderer<MineExplosion
                 return (D) this.fallbackManager;
             }
 
-            Object data = this.geckoData.get(dataTicket);
-            return (D) data;
+            return GeoRenderState.super.getGeckolibData(dataTicket);
         }
     }
 }
