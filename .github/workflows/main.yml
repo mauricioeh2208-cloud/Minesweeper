@@ -1,4 +1,4 @@
-name: Build Minesweeper
+name: Python CI
 
 on:
   push:
@@ -13,21 +13,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          distribution: temurin
-          java-version: 17
-          cache: gradle
+          python-version: "3.11"
 
-      - name: Give execute permission
-        run: chmod +x gradlew
-
-      - name: Build project
-        run: ./gradlew build
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: minesweeper-build
-          path: build/libs/*.jar
+      - name: Run tests
+        run: |
+          python solver_test.py
