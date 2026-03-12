@@ -1,23 +1,10 @@
-name: Python CI
+name: legacy-main-disabled
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  build:
+  placeholder:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run tests
-        run: |
-          python solver_test.py
+      - run: echo "Legacy workflow disabled. Use .github/workflows/build.yml"
