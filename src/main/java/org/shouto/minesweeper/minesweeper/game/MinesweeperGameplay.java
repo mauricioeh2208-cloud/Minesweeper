@@ -53,7 +53,7 @@ public final class MinesweeperGameplay {
     private static final int SNAPSHOT_SYNC_INTERVAL_TICKS = 10;
     private static final int INACTIVE_MINE_EFFECT_COOLDOWN_TICKS = 14;
     private static final int EXPLOSION_GECKO_LIFE_TICKS = MineExplosionEntity.ANIMATION_DURATION_TICKS;
-    private static final double EXPLOSION_GECKO_HEIGHT_OFFSET = 0.9D;
+    private static final double EXPLOSION_GECKO_HEIGHT_OFFSET = 0.65D;
     private static final float MINE_EXPLOSION_POWER = 2.35F;
     private static final double MINE_EXPLOSION_RADIUS = 1.9D;
     private static final double MINE_EXPLOSION_RADIUS_SQR = MINE_EXPLOSION_RADIUS * MINE_EXPLOSION_RADIUS;
