@@ -1,8 +1,8 @@
 {
   "ambientocclusion": false,
   "textures": {
-    "1": "minesweeper:block/explosive_minedesactivated",
-    "particle": "minesweeper:block/explosive_minedesactivated"
+    "1": "minesweeper:block/explosive_mineactivated",
+    "particle": "minesweeper:block/explosive_mineactivated"
   },
   "elements": [
     {

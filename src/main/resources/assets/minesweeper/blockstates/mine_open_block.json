@@ -1,7 +1,10 @@
 {
   "variants": {
-    "": {
+    "triggered=false": {
       "model": "minesweeper:block/mine_open_block"
+    },
+    "triggered=true": {
+      "model": "minesweeper:block/mine_open_block_triggered"
     }
   }
 }

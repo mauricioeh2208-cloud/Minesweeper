@@ -7,7 +7,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import org.shouto.minesweeper.minesweeper.network.payload.BoardSnapshotPayload;
 
 public final class MinesweeperHudRenderer {
-    private static final int MAP_RADIUS_PX = 38;
+    private static final int MAP_SIZE_PX = 76;
     private static final int CELL_SIZE_PX = 7;
     private static final int GRID_RADIUS = 5;
 
@@ -33,19 +33,20 @@ public final class MinesweeperHudRenderer {
             return;
         }
 
-        int centerX = 16 + MAP_RADIUS_PX;
-        int centerY = 16 + MAP_RADIUS_PX;
-        drawCircleBackground(graphics, centerX, centerY, MAP_RADIUS_PX, 0xD9CDBA96);
-        drawCells(graphics, snapshot, centerX, centerY, MAP_RADIUS_PX);
-        drawCircleOutline(graphics, centerX, centerY, MAP_RADIUS_PX, 0xFF7F725A);
+        int startX = 16;
+        int startY = 16;
+        int centerX = startX + (MAP_SIZE_PX / 2);
+        int centerY = startY + (MAP_SIZE_PX / 2);
+        drawSquareBackground(graphics, startX, startY, MAP_SIZE_PX, 0xD9CDBA96);
+        drawCells(graphics, snapshot, centerX, centerY);
+        drawSquareOutline(graphics, startX, startY, MAP_SIZE_PX, 0xFF7F725A);
     }
 
     private static void drawCells(
             GuiGraphics graphics,
             BoardSnapshotPayload snapshot,
             int centerX,
-            int centerY,
-            int circleRadius
+            int centerY
     ) {
         int focusX = snapshot.playerLocalX() >= 0 ? snapshot.playerLocalX() : snapshot.width() / 2;
         int focusZ = snapshot.playerLocalZ() >= 0 ? snapshot.playerLocalZ() : snapshot.height() / 2;
@@ -59,14 +60,6 @@ public final class MinesweeperHudRenderer {
                 int localX = focusX + dx;
                 int localZ = focusZ + dz;
                 byte state = snapshot.cellAt(localX, localZ);
-
-                int tileCenterX = screenX + (CELL_SIZE_PX / 2);
-                int tileCenterY = screenY + (CELL_SIZE_PX / 2);
-                int circleDx = tileCenterX - centerX;
-                int circleDy = tileCenterY - centerY;
-                if ((circleDx * circleDx) + (circleDy * circleDy) > circleRadius * circleRadius) {
-                    continue;
-                }
 
                 graphics.fill(screenX, screenY, screenX + CELL_SIZE_PX, screenY + CELL_SIZE_PX, colorForCell(state));
                 drawSymbol(graphics, font, state, screenX, screenY);
@@ -124,23 +117,14 @@ public final class MinesweeperHudRenderer {
         };
     }
 
-    private static void drawCircleBackground(GuiGraphics graphics, int centerX, int centerY, int radius, int color) {
-        for (int y = -radius; y <= radius; y++) {
-            int width = (int) Math.sqrt((radius * radius) - (y * y));
-            graphics.fill(centerX - width, centerY + y, centerX + width + 1, centerY + y + 1, color);
-        }
+    private static void drawSquareBackground(GuiGraphics graphics, int startX, int startY, int size, int color) {
+        graphics.fill(startX, startY, startX + size, startY + size, color);
     }
 
-    private static void drawCircleOutline(GuiGraphics graphics, int centerX, int centerY, int radius, int color) {
-        int outer = radius * radius;
-        int inner = (radius - 1) * (radius - 1);
-        for (int y = -radius; y <= radius; y++) {
-            for (int x = -radius; x <= radius; x++) {
-                int dist = (x * x) + (y * y);
-                if (dist <= outer && dist >= inner) {
-                    graphics.fill(centerX + x, centerY + y, centerX + x + 1, centerY + y + 1, color);
-                }
-            }
-        }
+    private static void drawSquareOutline(GuiGraphics graphics, int startX, int startY, int size, int color) {
+        graphics.fill(startX, startY, startX + size, startY + 1, color);
+        graphics.fill(startX, startY + size - 1, startX + size, startY + size, color);
+        graphics.fill(startX, startY, startX + 1, startY + size, color);
+        graphics.fill(startX + size - 1, startY, startX + size, startY + size, color);
     }
 }

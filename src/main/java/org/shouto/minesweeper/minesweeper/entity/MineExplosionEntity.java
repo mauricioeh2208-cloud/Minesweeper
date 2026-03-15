@@ -22,7 +22,7 @@ public class MineExplosionEntity extends Entity implements GeoEntity {
     private static final String EXPLOSION_CONTROLLER = "explosion_controller";
     public static final int ANIMATION_DURATION_TICKS = 24;
     private static final int DEFAULT_LIFE_TICKS = ANIMATION_DURATION_TICKS;
-    private static final RawAnimation EXPLOSION_ANIMATION = RawAnimation.begin().thenPlay("animacion");
+    private static final RawAnimation EXPLOSION_ANIMATION = RawAnimation.begin().thenPlay("animation");
 
     private AnimatableInstanceCache animatableCache;
     private AnimatableManager<MineExplosionEntity> fallbackManager;

@@ -6,6 +6,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerScoreboard;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -25,6 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class MinesweeperRoundManager {
+    private static final double ROUND_MAX_HEALTH = 6.0D;
     private static final Item[] MANAGED_ITEMS = new Item[]{
             MinesweeperItems.INTERACCION,
             MinesweeperItems.DESACTIVADOR_MINA,
@@ -56,6 +59,29 @@ public final class MinesweeperRoundManager {
         return PARTICIPANTS.contains(playerId);
     }
 
+    public static void ensureParticipant(ServerPlayer player) {
+        if (!active || player == null) {
+            return;
+        }
+        if (player.gameMode() == GameType.CREATIVE || player.gameMode() == GameType.SPECTATOR) {
+            return;
+        }
+
+        UUID playerId = player.getUUID();
+        if (PARTICIPANTS.contains(playerId)) {
+            return;
+        }
+
+        PARTICIPANTS.add(playerId);
+        SAVED_PLAYER_STATES.put(playerId, SavedPlayerState.capture(player));
+        prepareRoundPlayer(player);
+
+        MinecraftServer server = ((net.minecraft.server.level.ServerLevel) player.level()).getServer();
+        if (server != null) {
+            broadcast(server);
+        }
+    }
+
     public static RoundSettings configuredSettings() {
         return configuredSettings;
     }
@@ -81,6 +107,7 @@ public final class MinesweeperRoundManager {
         for (ServerPlayer player : participants) {
             PARTICIPANTS.add(player.getUUID());
             SAVED_PLAYER_STATES.put(player.getUUID(), SavedPlayerState.capture(player));
+            prepareRoundPlayer(player);
         }
 
         activeSettings = settings;
@@ -153,9 +180,9 @@ public final class MinesweeperRoundManager {
     }
 
     public enum RoundDifficulty {
-        FACIL("facil", 10, 10, 10, 12, 20 * 5, 20 * 14, 60, 20 * 30, 20 * 60 * 20),
-        MEDIO("medio", 18, 18, 40, 8, 20 * 8, 20 * 10, 80, 20 * 45, 20 * 60 * 20),
-        DIFICIL("dificil", 24, 24, 99, 4, 20 * 12, 20 * 7, 100, 20 * 60, 20 * 60 * 20);
+        FACIL("facil", 10, 10, 10, 2, 20 * 5, 20 * 14, 20 * 60 * 5, 20 * 30, 20 * 60 * 20),
+        MEDIO("medio", 18, 18, 40, 2, 20 * 8, 20 * 10, 20 * 60 * 5, 20 * 45, 20 * 60 * 20),
+        DIFICIL("dificil", 24, 24, 99, 2, 20 * 12, 20 * 7, 20 * 60 * 5, 20 * 60, 20 * 60 * 20);
 
         private final String id;
         private final int boardWidth;
@@ -285,7 +312,7 @@ public final class MinesweeperRoundManager {
             return custom(
                     RoundDifficulty.MEDIO.id(),
                     TeamMode.MANTENER,
-                    5,
+                    1,
                     true,
                     RoundDifficulty.MEDIO.mineTriggerDelayTicks(),
                     RoundDifficulty.MEDIO.respawnWaitTicks(),
@@ -341,7 +368,7 @@ public final class MinesweeperRoundManager {
                     Math.max(1, mineTriggerDelayTicks),
                     Math.max(20, respawnWaitTicks),
                     Math.max(20, disarmTimeoutTicks),
-                    Math.max(1, disablerCooldownTicks),
+                    Math.max(20 * 60 * 5, disablerCooldownTicks),
                     Math.max(20, totemCooldownTicks),
                     Math.max(20, roundDurationTicks)
             );
@@ -366,6 +393,8 @@ public final class MinesweeperRoundManager {
     private record SavedPlayerState(
             GameType gameMode,
             String teamName,
+            boolean invulnerable,
+            double maxHealthBase,
             float health,
             float absorption,
             int foodLevel,
@@ -388,6 +417,8 @@ public final class MinesweeperRoundManager {
             return new SavedPlayerState(
                     player.gameMode(),
                     player.getTeam() != null ? player.getTeam().getName() : null,
+                    player.isInvulnerable(),
+                    currentBaseMaxHealth(player),
                     player.getHealth(),
                     player.getAbsorptionAmount(),
                     player.getFoodData().getFoodLevel(),
@@ -408,6 +439,8 @@ public final class MinesweeperRoundManager {
             player.clearFire();
             player.setTicksFrozen(0);
             player.removeAllEffects();
+            player.setInvulnerable(invulnerable);
+            restoreMaxHealth(player, maxHealthBase);
 
             for (MobEffectInstance effect : activeEffects) {
                 player.addEffect(new MobEffectInstance(effect));
@@ -481,5 +514,31 @@ public final class MinesweeperRoundManager {
                 player.getCooldowns().removeCooldown(BuiltInRegistries.ITEM.getKey(item));
             }
         }
+
+        private static double currentBaseMaxHealth(ServerPlayer player) {
+            AttributeInstance attribute = player.getAttribute(Attributes.MAX_HEALTH);
+            return attribute != null ? attribute.getBaseValue() : player.getMaxHealth();
+        }
+
+        private static void restoreMaxHealth(ServerPlayer player, double baseValue) {
+            AttributeInstance attribute = player.getAttribute(Attributes.MAX_HEALTH);
+            if (attribute != null) {
+                attribute.setBaseValue(baseValue);
+            }
+        }
+    }
+
+    private static void prepareRoundPlayer(ServerPlayer player) {
+        AttributeInstance attribute = player.getAttribute(Attributes.MAX_HEALTH);
+        if (attribute != null) {
+            attribute.setBaseValue(ROUND_MAX_HEALTH);
+        }
+        player.setInvulnerable(true);
+        player.setHealth((float) ROUND_MAX_HEALTH);
+        player.setAbsorptionAmount(0.0F);
+        player.getFoodData().setFoodLevel(17);
+        player.getFoodData().setSaturation(0.0F);
+        player.clearFire();
+        player.setTicksFrozen(0);
     }
 }

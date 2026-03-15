@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class MinesweeperSessionManager {
-    private static final int INTRO_DURATION_TICKS = 20 * 120;
+    private static final int INTRO_DURATION_TICKS = 0;
     private static final int INTRO_LOCK_EFFECT_TICKS = 30;
     private static final int CAMERA_REFRESH_INTERVAL_TICKS = 20;
     private static final List<RoundDifficulty> FULL_STAGE_ORDER = List.of(
@@ -34,14 +34,7 @@ public final class MinesweeperSessionManager {
             RoundDifficulty.MEDIO,
             RoundDifficulty.DIFICIL
     );
-    private static final IntroCue[] INTRO_CUES = new IntroCue[]{
-            new IntroCue(0, "Lilith: Comencemos el primer desafio con Bombom, experta en explosivos.", false),
-            new IntroCue(20 * 20, "Usa Interaccion para revelar casillas a rango de 1 bloque.", false),
-            new IntroCue(20 * 40, "El Desactivador desactiva minas o revela una casilla si no hay mina.", false),
-            new IntroCue(20 * 60, "Si pisas o revelas una mina, explota y elimina a quien este cerca.", false),
-            new IntroCue(20 * 80, "Si todo tu equipo muere al mismo tiempo, queda eliminado y pasa a espectador.", false),
-            new IntroCue(20 * 100, "Completa facil, medio y dificil para terminar tu recorrido y ver a los demas.", false)
-    };
+    private static final IntroCue[] INTRO_CUES = new IntroCue[0];
 
     private static SessionState currentSession;
     private static int lastProcessedTick = -1;
@@ -65,7 +58,7 @@ public final class MinesweeperSessionManager {
 
         LinkedHashMap<String, TeamSessionState> teams = buildTeams(participants);
         if (teams.isEmpty()) {
-            return StartSessionResult.failure("No se pudieron formar equipos para la sesion.");
+            return StartSessionResult.failure("No se pudieron formar participantes para la sesion.");
         }
 
         Map<RoundDifficulty, List<BoardData>> boardsByDifficulty = collectBoardsByDifficulty();
@@ -76,8 +69,9 @@ public final class MinesweeperSessionManager {
 
         int introStartTick = server.getTickCount();
         int introEndTick = introStartTick + INTRO_DURATION_TICKS;
-        int playEndTick = introEndTick + MinesweeperRoundManager.activeSettings().roundDurationTicks();
+        int playEndTick = introStartTick + MinesweeperRoundManager.activeSettings().roundDurationTicks();
         SessionState session = new SessionState(introStartTick, introEndTick, playEndTick, stageOrder);
+        session.phase = SessionPhase.PLAYING;
 
         for (TeamSessionState team : teams.values()) {
             session.teams.put(team.teamKey, team);
@@ -95,8 +89,7 @@ public final class MinesweeperSessionManager {
             teleportTeamToCurrentBoard(server, team, false);
         }
 
-        broadcastParticipants(server, Component.literal("Sesion de buscaminas iniciada. Introduccion de 2 minutos."), false);
-        sendCue(session, server, INTRO_CUES[0]);
+        broadcastParticipants(server, Component.literal("Sesion de buscaminas iniciada."), false);
         return StartSessionResult.success(
                 "Sesion iniciada para " + participants.size()
                         + " jugador(es) en modo " + describeStageOrder(stageOrder) + "."
@@ -123,8 +116,7 @@ public final class MinesweeperSessionManager {
 
     public static String teamKeyForPlayer(ServerPlayer player) {
         if (currentSession == null) {
-            PlayerTeam team = player.getTeam();
-            return team != null ? team.getName() : null;
+            return "solo:" + player.getUUID();
         }
 
         return currentSession.playerTeams.get(player.getUUID());
@@ -175,7 +167,7 @@ public final class MinesweeperSessionManager {
             String nextDifficulty = currentSession.stageOrder.get(team.currentStageIndex).id();
             broadcastParticipants(
                     level.getServer(),
-                    Component.literal("Equipo " + team.displayName + " completo " + assignment.difficulty().id() + " y pasa a " + nextDifficulty + "."),
+                    Component.literal(team.displayName + " completo " + assignment.difficulty().id() + " y pasa a " + nextDifficulty + "."),
                     false
             );
             teleportTeamToCurrentBoard(level.getServer(), team, true);
@@ -183,17 +175,17 @@ public final class MinesweeperSessionManager {
         } else {
             team.completed = true;
             String finishedMessage = currentSession.stageOrder.size() > 1
-                    ? "Equipo " + team.displayName + " completo los " + currentSession.stageOrder.size() + " tableros con " + team.bestScore + " punto(s)."
-                    : "Equipo " + team.displayName + " completo " + currentSession.stageOrder.get(0).id() + " con " + team.bestScore + " punto(s).";
+                    ? team.displayName + " completo los " + currentSession.stageOrder.size() + " tableros con " + team.bestScore + " punto(s)."
+                    : team.displayName + " completo " + currentSession.stageOrder.get(0).id() + " con " + team.bestScore + " punto(s).";
             broadcastParticipants(level.getServer(), Component.literal(finishedMessage), false);
             moveTeamToObserverMode(
                     level.getServer(),
                     team,
-                    Component.literal("Tu equipo termino el recorrido. Ahora spectearas a los que sigan jugando.")
-            );
+                Component.literal("Terminaste el recorrido. Ahora spectearas a los que sigan jugando.")
+        );
         }
 
-        finishIfNoActiveTeams(level.getServer(), "Todos los equipos terminaron su recorrido.");
+        finishIfNoActiveTeams(level.getServer(), "Todos los jugadores terminaron su recorrido.");
         return true;
     }
 
@@ -211,16 +203,16 @@ public final class MinesweeperSessionManager {
         updateTeamScore(team);
         broadcastParticipants(
                 server,
-                Component.literal("Equipo " + team.displayName + " eliminado con " + team.bestScore + " punto(s)."),
+                Component.literal(team.displayName + " quedo fuera con " + team.bestScore + " punto(s)."),
                 false
         );
         moveTeamToObserverMode(
                 server,
                 team,
-                Component.literal("Tu equipo fue eliminado. Ahora spectearas a los que sigan jugando.")
+                Component.literal("Ya no tienes vidas. Ahora spectearas a los que sigan jugando.")
         );
 
-        finishIfNoActiveTeams(server, "Ya no quedan equipos jugando.");
+        finishIfNoActiveTeams(server, "Ya no quedan jugadores jugando.");
     }
 
     public static void tick(MinecraftServer server, int tick) {
@@ -253,7 +245,7 @@ public final class MinesweeperSessionManager {
         List<String> lines = new ArrayList<>();
         lines.add(
                 "fase=" + currentSession.phase.id
-                        + ", equipos=" + currentSession.teams.size()
+                        + ", jugadores=" + currentSession.teams.size()
                         + ", intro_restante=" + formatSeconds(Math.max(0, currentSession.introEndTick - currentSession.introStartTick))
         );
 
@@ -486,8 +478,8 @@ public final class MinesweeperSessionManager {
         LinkedHashMap<String, TeamSessionState> teams = new LinkedHashMap<>();
         for (ServerPlayer player : participants) {
             PlayerTeam team = player.getTeam();
-            String teamKey = team != null ? team.getName() : "solo:" + player.getUUID();
-            String displayName = team != null ? team.getName() : player.getScoreboardName();
+            String teamKey = "solo:" + player.getUUID();
+            String displayName = player.getScoreboardName();
 
             TeamSessionState teamState = teams.computeIfAbsent(teamKey, key -> new TeamSessionState(teamKey, displayName));
             teamState.memberIds.add(player.getUUID());
@@ -520,7 +512,7 @@ public final class MinesweeperSessionManager {
     private static int discoveredMineCount(BoardData board) {
         int count = 0;
         for (long mine : board.mines()) {
-            if (board.disarmedMines().contains(mine) || board.flagged().contains(mine) || board.revealed().contains(mine)) {
+            if (board.disarmedMines().contains(mine) || board.explodedMines().contains(mine) || board.flagged().contains(mine) || board.revealed().contains(mine)) {
                 count++;
             }
         }

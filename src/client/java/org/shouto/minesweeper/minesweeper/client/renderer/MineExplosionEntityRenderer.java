@@ -2,6 +2,10 @@ package org.shouto.minesweeper.minesweeper.client.renderer;
 
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.Identifier;
 import org.shouto.minesweeper.minesweeper.client.model.MineExplosionGeoModel;
 import org.shouto.minesweeper.minesweeper.entity.MineExplosionEntity;
 import software.bernie.geckolib.animatable.manager.AnimatableManager;
@@ -21,7 +25,7 @@ public class MineExplosionEntityRenderer extends GeoEntityRenderer<MineExplosion
     public MineExplosionEntityRenderer(EntityRendererProvider.Context context) {
         super(context, new MineExplosionGeoModel());
         this.shadowRadius = 0.0F;
-        this.withScale(1.8F);
+        this.withScale(0.7F);
     }
 
     @Override
@@ -83,6 +87,16 @@ public class MineExplosionEntityRenderer extends GeoEntityRenderer<MineExplosion
         double progress = clampedAge / MineExplosionEntity.ANIMATION_DURATION_TICKS;
 
         return Math.min(FRAME_COUNT, (int) (progress * FRAME_COUNT) + 1);
+    }
+
+    @Override
+    public RenderType getRenderType(MineExplosionRenderState renderState, Identifier texture) {
+        return RenderTypes.entityTranslucent(texture);
+    }
+
+    @Override
+    protected int getBlockLightLevel(MineExplosionEntity entity, BlockPos pos) {
+        return 15;
     }
 
     public static final class MineExplosionRenderState extends EntityRenderState implements GeoRenderState {

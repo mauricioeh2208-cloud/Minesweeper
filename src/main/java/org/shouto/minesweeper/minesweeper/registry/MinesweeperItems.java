@@ -10,6 +10,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import org.shouto.minesweeper.minesweeper.Minesweeper;
 import org.shouto.minesweeper.minesweeper.item.BanderaItem;
+import org.shouto.minesweeper.minesweeper.item.DesactivadorMinaItem;
 import org.shouto.minesweeper.minesweeper.item.InteraccionItem;
 
 public final class MinesweeperItems {
@@ -27,7 +28,7 @@ public final class MinesweeperItems {
     public static final Item NUMBER_BLOCK_5_ITEM = registerBlockItem("number_block_5", MinesweeperBlocks.NUMBER_BLOCK_5);
 
     public static final Item TOTEM_INMORTALIDAD = registerSimpleItem("totem_inmortalidad");
-    public static final Item DESACTIVADOR_MINA = registerSimpleItem("desactivador_mina");
+    public static final Item DESACTIVADOR_MINA = registerItem("desactivador_mina", DesactivadorMinaItem::new);
     public static final Item INTERACCION = registerItem("interaccion", InteraccionItem::new);
     public static final Item BANDERA = registerItem("bandera", BanderaItem::new);
 

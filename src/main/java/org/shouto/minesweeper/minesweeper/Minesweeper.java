@@ -3,6 +3,7 @@ package org.shouto.minesweeper.minesweeper;
 import net.fabricmc.api.ModInitializer;
 import org.shouto.minesweeper.minesweeper.command.MinesweeperCommands;
 import org.shouto.minesweeper.minesweeper.game.MinesweeperGameplay;
+import org.shouto.minesweeper.minesweeper.game.MinesweeperBoardStorage;
 import org.shouto.minesweeper.minesweeper.network.MinesweeperNetworking;
 import org.shouto.minesweeper.minesweeper.registry.MinesweeperBlocks;
 import org.shouto.minesweeper.minesweeper.registry.MinesweeperEntities;
@@ -21,5 +22,6 @@ public class Minesweeper implements ModInitializer {
         MinesweeperNetworking.initialize();
         MinesweeperCommands.initialize();
         MinesweeperGameplay.initialize();
+        MinesweeperBoardStorage.initialize();
     }
 }

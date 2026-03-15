@@ -19,8 +19,8 @@ public final class MinesweeperBoardSync {
         if (!(player.level() instanceof ServerLevel level)) {
             return;
         }
-        if (MinesweeperRoundManager.isActive() && !MinesweeperRoundManager.isParticipant(player)) {
-            return;
+        if (MinesweeperRoundManager.isActive()) {
+            MinesweeperRoundManager.ensureParticipant(player);
         }
 
         Optional<BoardData> boardOptional;
@@ -35,17 +35,15 @@ public final class MinesweeperBoardSync {
     }
 
     public static void sendBestSnapshot(ServerPlayer player) {
-        if (MinesweeperRoundManager.isActive() && !MinesweeperRoundManager.isParticipant(player)) {
-            return;
+        if (MinesweeperRoundManager.isActive()) {
+            MinesweeperRoundManager.ensureParticipant(player);
         }
         findBestBoard(player).ifPresent(board -> sendSnapshot(player, board));
     }
 
     public static void broadcastBoardSnapshot(ServerLevel level, BoardData board) {
         for (ServerPlayer player : level.players()) {
-            if (MinesweeperRoundManager.isParticipant(player)) {
-                sendSnapshot(player, board);
-            }
+            sendSnapshot(player, board);
         }
     }
 
@@ -128,11 +126,14 @@ public final class MinesweeperBoardSync {
         BlockPos worldPos = board.origin().offset(localX, 0, localZ);
         long local = packLocal(localX, localZ);
 
-        if (board.flagged().contains(local)) {
-            return BoardSnapshotPayload.CELL_FLAG;
-        }
         if (board.disarmedMines().contains(local)) {
             return BoardSnapshotPayload.CELL_DISARMED_MINE;
+        }
+        if (board.explodedMines().contains(local)) {
+            return BoardSnapshotPayload.CELL_REVEALED_MINE;
+        }
+        if (board.flagged().contains(local)) {
+            return BoardSnapshotPayload.CELL_FLAG;
         }
         if (!board.revealed().contains(local)) {
             return BoardSnapshotPayload.CELL_HIDDEN;

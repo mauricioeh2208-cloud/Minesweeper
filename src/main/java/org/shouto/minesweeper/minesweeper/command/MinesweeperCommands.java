@@ -3,7 +3,6 @@ package org.shouto.minesweeper.minesweeper.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -78,7 +77,6 @@ public final class MinesweeperCommands {
                         .then(Commands.argument("id", IntegerArgumentType.integer(1))
                                 .executes(MinesweeperCommands::deleteBoard)))
                 .then(buildGiveItemsCommand())
-                .then(buildRandomTeamsCommand())
                 .then(buildConfigureRoundCommand())
                 .then(buildStartRoundCommand())
                 .then(Commands.literal("detener_ronda")
@@ -188,18 +186,16 @@ public final class MinesweeperCommands {
         return branch;
     }
 
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> buildCustomSettingsArguments(
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, Boolean> buildCustomSettingsArguments(
             RoundCommandExecutor executor
     ) {
-        return Commands.argument(ARG_TEAM_MODE, StringArgumentType.word())
-                .then(Commands.argument(ARG_TEAM_SIZE, IntegerArgumentType.integer(1, 64))
-                        .then(Commands.argument(ARG_GIVE_ITEMS, BoolArgumentType.bool())
-                                .then(Commands.argument(ARG_MINE_DELAY, IntegerArgumentType.integer(1, 200))
-                                        .then(Commands.argument(ARG_RESPAWN_SECONDS, IntegerArgumentType.integer(1, 600))
-                                                .then(Commands.argument(ARG_DISARM_SECONDS, IntegerArgumentType.integer(1, 600))
-                                                        .then(Commands.argument(ARG_DISABLER_COOLDOWN, IntegerArgumentType.integer(1, 1200))
-                                                                .then(Commands.argument(ARG_TOTEM_SECONDS, IntegerArgumentType.integer(1, 3600))
-                                                                        .executes(executor::run))))))));
+        return Commands.argument(ARG_GIVE_ITEMS, BoolArgumentType.bool())
+                .then(Commands.argument(ARG_MINE_DELAY, IntegerArgumentType.integer(1, 200))
+                        .then(Commands.argument(ARG_RESPAWN_SECONDS, IntegerArgumentType.integer(1, 600))
+                                .then(Commands.argument(ARG_DISARM_SECONDS, IntegerArgumentType.integer(1, 600))
+                                        .then(Commands.argument(ARG_DISABLER_COOLDOWN, IntegerArgumentType.integer(1, 72000))
+                                                .then(Commands.argument(ARG_TOTEM_SECONDS, IntegerArgumentType.integer(1, 3600))
+                                                        .executes(executor::run))))));
     }
 
     private static int createBoard(CommandContext<CommandSourceStack> context, BlockPos origin) {
@@ -330,11 +326,6 @@ public final class MinesweeperCommands {
 
     private static int startRound(CommandContext<CommandSourceStack> context) {
         MinesweeperGameplay.resetRoundState();
-        int teams = assignRandomTeams(context);
-        if (teams <= 0) {
-            return teams;
-        }
-
         for (ServerPlayer player : context.getSource().getServer().getPlayerList().getPlayers()) {
             player.getInventory().add(MinesweeperItems.INTERACCION.getDefaultInstance());
             player.getInventory().add(MinesweeperItems.DESACTIVADOR_MINA.getDefaultInstance());
@@ -342,7 +333,7 @@ public final class MinesweeperCommands {
         }
 
         MinesweeperRoundManager.setActive(context.getSource().getServer(), true);
-        context.getSource().sendSuccess(() -> Component.literal("Ronda iniciada: equipos listos y objetos entregados."), true);
+        context.getSource().sendSuccess(() -> Component.literal("Ronda iniciada: objetos entregados."), true);
         return 1;
     }
 
@@ -458,15 +449,6 @@ public final class MinesweeperCommands {
         MinesweeperBoardManager.resetAllBoardStates(server);
         MinesweeperRoundManager.startRound(server, participants, settings);
 
-        if (settings.teamMode() == TeamMode.ALEATORIOS) {
-            int teams = assignRandomTeamsToPlayers(server, participants, settings.teamSize(), "ms_round_", true);
-            if (teams <= 0) {
-                context.getSource().sendFailure(Component.literal("No se pudieron crear equipos para la ronda."));
-                resetRound(server);
-                return 0;
-            }
-        }
-
         if (settings.giveItems()) {
             for (ServerPlayer player : participants) {
                 giveRoundItems(player);
@@ -579,15 +561,8 @@ public final class MinesweeperCommands {
     }
 
     private static RoundSettings customSettingsFromContext(CommandContext<CommandSourceStack> context) {
-        TeamMode teamMode;
-        try {
-            teamMode = TeamMode.byId(StringArgumentType.getString(context, ARG_TEAM_MODE));
-        } catch (IllegalArgumentException exception) {
-            context.getSource().sendFailure(Component.literal("Modo de equipos invalido. Usa mantener o aleatorios."));
-            return null;
-        }
-
-        int teamSize = IntegerArgumentType.getInteger(context, ARG_TEAM_SIZE);
+        TeamMode teamMode = TeamMode.MANTENER;
+        int teamSize = 1;
         boolean giveItems = BoolArgumentType.getBool(context, ARG_GIVE_ITEMS);
         int mineDelayTicks = IntegerArgumentType.getInteger(context, ARG_MINE_DELAY);
         int respawnSeconds = IntegerArgumentType.getInteger(context, ARG_RESPAWN_SECONDS);
@@ -610,8 +585,6 @@ public final class MinesweeperCommands {
 
     private static String describeSettings(RoundSettings settings) {
         return "dificultad=" + settings.label()
-                + ", equipos=" + settings.teamMode().id()
-                + ", tamano_equipo=" + settings.teamSize()
                 + ", dar_objetos=" + (settings.giveItems() ? "si" : "no")
                 + ", retardo_mina=" + settings.mineTriggerDelayTicks() + "t"
                 + ", respawn=" + (settings.respawnWaitTicks() / 20) + "s"
