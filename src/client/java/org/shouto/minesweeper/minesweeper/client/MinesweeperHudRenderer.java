@@ -4,12 +4,20 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.world.item.ItemStack;
+import org.shouto.minesweeper.minesweeper.client.MinesweeperClientState.ActiveInteractionProgress;
+import org.shouto.minesweeper.minesweeper.client.MinesweeperClientState.InteractionProgressKind;
 import org.shouto.minesweeper.minesweeper.network.payload.BoardSnapshotPayload;
+import org.shouto.minesweeper.minesweeper.registry.MinesweeperItems;
 
 public final class MinesweeperHudRenderer {
     private static final int MAP_SIZE_PX = 76;
     private static final int CELL_SIZE_PX = 7;
     private static final int GRID_RADIUS = 5;
+    private static final int PROGRESS_PANEL_W = 138;
+    private static final int PROGRESS_PANEL_H = 30;
+    private static final int PROGRESS_BAR_W = 82;
+    private static final int PROGRESS_BAR_H = 10;
 
     private MinesweeperHudRenderer() {
     }
@@ -33,13 +41,17 @@ public final class MinesweeperHudRenderer {
             return;
         }
 
-        int startX = 16;
-        int startY = 16;
-        int centerX = startX + (MAP_SIZE_PX / 2);
-        int centerY = startY + (MAP_SIZE_PX / 2);
-        drawSquareBackground(graphics, startX, startY, MAP_SIZE_PX, 0xD9CDBA96);
-        drawCells(graphics, snapshot, centerX, centerY);
-        drawSquareOutline(graphics, startX, startY, MAP_SIZE_PX, 0xFF7F725A);
+        if (snapshot != null) {
+            int startX = 16;
+            int startY = 16;
+            int centerX = startX + (MAP_SIZE_PX / 2);
+            int centerY = startY + (MAP_SIZE_PX / 2);
+            drawSquareBackground(graphics, startX, startY, MAP_SIZE_PX, 0xD9CDBA96);
+            drawCells(graphics, snapshot, centerX, centerY);
+            drawSquareOutline(graphics, startX, startY, MAP_SIZE_PX, 0xFF7F725A);
+        }
+
+        renderInteractionProgress(graphics, client);
     }
 
     private static void drawCells(
@@ -126,5 +138,51 @@ public final class MinesweeperHudRenderer {
         graphics.fill(startX, startY + size - 1, startX + size, startY + size, color);
         graphics.fill(startX, startY, startX + 1, startY + size, color);
         graphics.fill(startX + size - 1, startY, startX + size, startY + size, color);
+    }
+
+    private static void renderInteractionProgress(GuiGraphics graphics, Minecraft client) {
+        ActiveInteractionProgress progress = MinesweeperClientState.getInteractionProgress();
+        if (progress == null) {
+            return;
+        }
+
+        Font font = client.font;
+        int x = (graphics.guiWidth() - PROGRESS_PANEL_W) / 2;
+        int y = graphics.guiHeight() - 74;
+        int barX = x + 28;
+        int barY = y + 14;
+        int fillW = Math.max(0, Math.min(PROGRESS_BAR_W, Math.round(PROGRESS_BAR_W * progress.progress())));
+
+        graphics.fill(x, y, x + PROGRESS_PANEL_W, y + PROGRESS_PANEL_H, 0xCC221C16);
+        graphics.renderOutline(x, y, PROGRESS_PANEL_W, PROGRESS_PANEL_H, 0xFFB89361);
+
+        String title = progress.kind() == InteractionProgressKind.DISARM ? "DESACTIVANDO..." : "DESCUBRIENDO...";
+        int titleColor = progress.kind() == InteractionProgressKind.DISARM ? 0xFFF6C56A : 0xFFFFA33A;
+        graphics.drawCenteredString(font, title, x + (PROGRESS_PANEL_W / 2), y + 4, titleColor);
+
+        graphics.fill(barX, barY, barX + PROGRESS_BAR_W, barY + PROGRESS_BAR_H, 0xFF3C3B33);
+        graphics.fill(barX + 1, barY + 1, barX + fillW, barY + PROGRESS_BAR_H - 1, progressFillColor(progress.kind()));
+        graphics.fill(barX + 1, barY + 1, barX + fillW, barY + 3, 0x55FFF7B3);
+        graphics.renderOutline(barX, barY, PROGRESS_BAR_W, PROGRESS_BAR_H, 0xFFB89361);
+
+        graphics.renderItem(leftIcon(progress.kind()), x + 6, y + 9);
+        graphics.renderItem(MinesweeperItems.MINE_OPEN_BLOCK_ITEM.getDefaultInstance(), x + PROGRESS_PANEL_W - 22, y + 9);
+
+        int percent = Math.round(progress.progress() * 100.0F);
+        graphics.drawCenteredString(font, percent + "%", barX + (PROGRESS_BAR_W / 2), y + 15, 0xFFE7D9C4);
+    }
+
+    private static ItemStack leftIcon(InteractionProgressKind kind) {
+        return switch (kind) {
+            case DISARM -> MinesweeperItems.DESACTIVADOR_MINA.getDefaultInstance();
+            case REVEAL -> MinesweeperItems.INTERACCION.getDefaultInstance();
+        };
+    }
+
+    private static int progressFillColor(InteractionProgressKind kind) {
+        return switch (kind) {
+            case DISARM -> 0xFF41A65A;
+            case REVEAL -> 0xFF94C93D;
+        };
     }
 }

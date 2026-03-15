@@ -28,11 +28,14 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.shouto.minesweeper.minesweeper.entity.MineExplosionEntity;
 import org.shouto.minesweeper.minesweeper.game.MinesweeperBoardManager.BoardData;
 import org.shouto.minesweeper.minesweeper.game.MinesweeperBoardManager.RevealResult;
 import org.shouto.minesweeper.minesweeper.network.payload.PlayerInteractionAnimPayload;
+import org.shouto.minesweeper.minesweeper.network.payload.InteractionHoldPayload;
+import org.shouto.minesweeper.minesweeper.network.payload.InteractionProgressPayload;
 import org.shouto.minesweeper.minesweeper.registry.MinesweeperBlocks;
 import org.shouto.minesweeper.minesweeper.registry.MinesweeperItems;
 
@@ -52,7 +55,9 @@ public final class MinesweeperGameplay {
     private static final int PRE_EXPLOSION_TICKS = 8;
     private static final int FLAG_PICKUP_ANIMATION_TICKS = 12;
     private static final int SNAPSHOT_SYNC_INTERVAL_TICKS = 10;
+    private static final int HOLD_CONFIRMATION_GRACE_TICKS = 3;
     private static final int EXPLOSION_GECKO_LIFE_TICKS = MineExplosionEntity.ANIMATION_DURATION_TICKS;
+    private static final int TOTEM_PARTICLE_COUNT = 28;
     private static final double EXPLOSION_GECKO_HEIGHT_OFFSET = 0.85D;
     private static final double MAX_INTERACTION_DISTANCE_SQR = 4.0D;
     private static final double MINE_EXPLOSION_RADIUS = 4.5D;
@@ -67,6 +72,7 @@ public final class MinesweeperGameplay {
     private static final Map<UUID, PendingMineTrigger> PENDING_MINE_TRIGGERS = new HashMap<>();
     private static final Map<BoardCellKey, PendingExplosion> PENDING_EXPLOSIONS = new HashMap<>();
     private static final Map<UUID, BoardCellKey> LAST_LIFE_LOSS_MINE = new HashMap<>();
+    private static final Map<UUID, ClientInteractionHold> CLIENT_INTERACTION_HOLDS = new HashMap<>();
 
     private MinesweeperGameplay() {
     }
@@ -88,6 +94,57 @@ public final class MinesweeperGameplay {
         PENDING_MINE_TRIGGERS.clear();
         PENDING_EXPLOSIONS.clear();
         LAST_LIFE_LOSS_MINE.clear();
+        CLIENT_INTERACTION_HOLDS.clear();
+    }
+
+    public static void initializeRoundPlayers(Iterable<ServerPlayer> players) {
+        for (ServerPlayer player : players) {
+            initializeRoundPlayer(player);
+        }
+    }
+
+    public static void initializeRoundPlayer(ServerPlayer player) {
+        if (player == null || !MinesweeperRoundManager.isActive() || !MinesweeperRoundManager.isParticipant(player)) {
+            return;
+        }
+
+        UUID playerId = player.getUUID();
+        PLAYER_LIVES.put(playerId, PLAYER_STARTING_LIVES);
+        LAST_LIFE_LOSS_MINE.remove(playerId);
+        PENDING_REVEALS.remove(playerId);
+        PENDING_DISARM_HOLDS.remove(playerId);
+        PENDING_MINE_TRIGGERS.remove(playerId);
+        INTERACTION_USE_RELEASE_TICK.remove(playerId);
+        CLIENT_INTERACTION_HOLDS.remove(playerId);
+        clearInteractionProgress(player);
+        player.stopUsingItem();
+        player.setInvulnerable(true);
+        player.setAbsorptionAmount(0.0F);
+        player.setGameMode(MinesweeperRoundManager.participantGameMode(playerId));
+        applyLifeHealth(player, PLAYER_STARTING_LIVES);
+        syncPlayerLifeState(player);
+    }
+
+    public static void recordInteractionHold(ServerPlayer player, InteractionHoldPayload payload) {
+        if (player == null || !(player.level() instanceof ServerLevel level) || !MinesweeperRoundManager.isActive()) {
+            return;
+        }
+        if (!MinesweeperRoundManager.isParticipant(player) || !MinesweeperSessionManager.isGameplayOpen()) {
+            CLIENT_INTERACTION_HOLDS.remove(player.getUUID());
+            return;
+        }
+
+        Optional<BoardCellTarget> targetOptional = resolveBoardCell(level, new BlockPos(payload.x(), payload.y(), payload.z()));
+        if (targetOptional.isEmpty()) {
+            CLIENT_INTERACTION_HOLDS.remove(player.getUUID());
+            return;
+        }
+
+        BoardCellTarget target = targetOptional.get();
+        CLIENT_INTERACTION_HOLDS.put(
+                player.getUUID(),
+                new ClientInteractionHold(target.board().boardId(), target.cellPos(), payload.hand(), level.getServer().getTickCount())
+        );
     }
 
     private static InteractionResult onUseItem(Player player, Level level, InteractionHand hand) {
@@ -260,6 +317,7 @@ public final class MinesweeperGameplay {
                 player.getUUID(),
                 new PendingHoldDisarm(board.boardId(), cellPos.immutable(), hand, tick + DISARM_HOLD_TICKS)
         );
+        CLIENT_INTERACTION_HOLDS.put(player.getUUID(), new ClientInteractionHold(board.boardId(), cellPos.immutable(), hand, tick));
         sendDisarmProgress(player, tick, tick + DISARM_HOLD_TICKS);
         return InteractionResult.SUCCESS;
     }
@@ -294,6 +352,7 @@ public final class MinesweeperGameplay {
         int tick = level.getServer().getTickCount();
         playInteractionAnimation(player, tick, hand, cellPos, PlayerInteractionAnimation.INTERACT);
         PENDING_REVEALS.put(player.getUUID(), new PendingReveal(board.boardId(), cellPos.immutable(), hand, tick + INTERACTION_HOLD_TICKS));
+        CLIENT_INTERACTION_HOLDS.put(player.getUUID(), new ClientInteractionHold(board.boardId(), cellPos.immutable(), hand, tick));
         sendRevealProgress(player, tick, tick + INTERACTION_HOLD_TICKS);
         return InteractionResult.SUCCESS;
     }
@@ -367,6 +426,11 @@ public final class MinesweeperGameplay {
             return;
         }
 
+        if (!PLAYER_LIVES.containsKey(newPlayer.getUUID())) {
+            initializeRoundPlayer(newPlayer);
+            return;
+        }
+
         applyLifeHealth(newPlayer, PLAYER_LIVES.getOrDefault(newPlayer.getUUID(), PLAYER_STARTING_LIVES));
         syncPlayerLifeState(newPlayer);
         newPlayer.setCamera(newPlayer);
@@ -413,8 +477,10 @@ public final class MinesweeperGameplay {
                 continue;
             }
             if (!player.getItemInHand(pending.hand()).is(MinesweeperItems.INTERACCION)
+                    || !isHoldConfirmed(player, pending.boardId(), pending.cellPos(), pending.hand(), tick)
                     || !isWithinInteractionRange(player, pending.cellPos())) {
                 PENDING_REVEALS.remove(playerId, pending);
+                clearInteractionProgress(player);
                 player.stopUsingItem();
                 continue;
             }
@@ -425,6 +491,7 @@ public final class MinesweeperGameplay {
             }
 
             PENDING_REVEALS.remove(playerId, pending);
+            clearInteractionProgress(player);
             player.stopUsingItem();
             player.getCooldowns().addCooldown(MinesweeperItems.INTERACCION.getDefaultInstance(), INTERACTION_COOLDOWN_TICKS);
 
@@ -474,8 +541,10 @@ public final class MinesweeperGameplay {
                 continue;
             }
             if (!player.getItemInHand(pending.hand()).is(MinesweeperItems.DESACTIVADOR_MINA)
+                    || !isHoldConfirmed(player, pending.boardId(), pending.cellPos(), pending.hand(), tick)
                     || !isWithinInteractionRange(player, pending.cellPos())) {
                 PENDING_DISARM_HOLDS.remove(playerId, pending);
+                clearInteractionProgress(player);
                 player.stopUsingItem();
                 continue;
             }
@@ -486,6 +555,7 @@ public final class MinesweeperGameplay {
             }
 
             PENDING_DISARM_HOLDS.remove(playerId, pending);
+            clearInteractionProgress(player);
             player.stopUsingItem();
 
             cancelPendingExplosion(board.boardId(), pending.cellPos());
@@ -671,6 +741,10 @@ public final class MinesweeperGameplay {
                 other.push(pushX, 0.14D + (blastStrength * 0.24D), pushZ);
             }
 
+            if (tryActivateTotem(level, other)) {
+                continue;
+            }
+
             consumeLife(level, other, mineKey);
         }
 
@@ -687,6 +761,8 @@ public final class MinesweeperGameplay {
         PENDING_REVEALS.remove(player.getUUID());
         PENDING_MINE_TRIGGERS.remove(player.getUUID());
         PENDING_DISARM_HOLDS.remove(player.getUUID());
+        CLIENT_INTERACTION_HOLDS.remove(player.getUUID());
+        clearInteractionProgress(player);
         player.stopUsingItem();
 
         if (remaining > 0) {
@@ -694,6 +770,8 @@ public final class MinesweeperGameplay {
             return;
         }
 
+        player.setHealth(Math.max(1.0F, player.getHealth()));
+        player.setInvulnerable(true);
         player.setGameMode(net.minecraft.world.level.GameType.SPECTATOR);
         player.displayClientMessage(Component.literal("Sin vidas. Ahora spectearas el resto de la ronda."), false);
         MinesweeperSessionManager.handleTeamEliminated(level.getServer(), MinesweeperSessionManager.teamKeyForPlayer(player));
@@ -704,6 +782,9 @@ public final class MinesweeperGameplay {
             return;
         }
 
+        if (!PLAYER_LIVES.containsKey(player.getUUID())) {
+            initializeRoundPlayer(player);
+        }
         int lives = PLAYER_LIVES.computeIfAbsent(player.getUUID(), ignored -> PLAYER_STARTING_LIVES);
         AttributeInstance maxHealth = player.getAttribute(Attributes.MAX_HEALTH);
         double targetMaxHealth = targetMaxHealthForLives(lives);
@@ -748,6 +829,40 @@ public final class MinesweeperGameplay {
         return (float) (lives > 0 ? targetMaxHealthForLives(lives) : 1.0D);
     }
 
+    private static boolean tryActivateTotem(ServerLevel level, ServerPlayer player) {
+        ItemStack totemStack = findTotemStack(player);
+        if (totemStack.isEmpty() || player.getCooldowns().isOnCooldown(totemStack)) {
+            return false;
+        }
+
+        player.getCooldowns().addCooldown(totemStack, totemCooldownTicks());
+        level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.TOTEM_USE, SoundSource.PLAYERS, 1.0F, 1.0F);
+        level.sendParticles(
+                ParticleTypes.TOTEM_OF_UNDYING,
+                player.getX(),
+                player.getY() + 1.0D,
+                player.getZ(),
+                TOTEM_PARTICLE_COUNT,
+                0.35D,
+                0.6D,
+                0.35D,
+                0.12D
+        );
+        player.displayClientMessage(Component.literal("El totem te salvo de la explosion."), true);
+        return true;
+    }
+
+    private static ItemStack findTotemStack(ServerPlayer player) {
+        int size = player.getInventory().getContainerSize();
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.is(MinesweeperItems.TOTEM_INMORTALIDAD)) {
+                return stack;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
     private static void spawnExplosionBurst(ServerLevel level, double centerX, double centerY, double centerZ) {
         level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY - 0.35D, centerZ, 1, 0.0D, 0.0D, 0.0D, 0.0D);
         level.sendParticles(ParticleTypes.EXPLOSION, centerX, centerY - 0.2D, centerZ, 8, 0.18D, 0.10D, 0.18D, 0.01D);
@@ -759,17 +874,23 @@ public final class MinesweeperGameplay {
     private static void sendRevealProgress(ServerPlayer player, int tick, int finishTick) {
         int remaining = Math.max(0, finishTick - tick);
         int progress = Math.max(0, INTERACTION_HOLD_TICKS - remaining);
-        int filled = Math.min(10, (progress * 10) / INTERACTION_HOLD_TICKS);
-        String bar = "[" + "#".repeat(filled) + "-".repeat(10 - filled) + "]";
-        player.displayClientMessage(Component.literal("Descubriendo " + bar), true);
+        int progressPercent = Math.min(100, (progress * 100) / INTERACTION_HOLD_TICKS);
+        sendInteractionProgress(player, InteractionProgressPayload.KIND_REVEAL, progressPercent);
     }
 
     private static void sendDisarmProgress(ServerPlayer player, int tick, int finishTick) {
         int remaining = Math.max(0, finishTick - tick);
         int progress = Math.max(0, DISARM_HOLD_TICKS - remaining);
-        int filled = Math.min(10, (progress * 10) / DISARM_HOLD_TICKS);
-        String bar = "[" + "#".repeat(filled) + "-".repeat(10 - filled) + "]";
-        player.displayClientMessage(Component.literal("Desactivando " + bar), true);
+        int progressPercent = Math.min(100, (progress * 100) / DISARM_HOLD_TICKS);
+        sendInteractionProgress(player, InteractionProgressPayload.KIND_DISARM, progressPercent);
+    }
+
+    private static void sendInteractionProgress(ServerPlayer player, byte kindId, int progressPercent) {
+        ServerPlayNetworking.send(player, new InteractionProgressPayload(kindId, (byte) Math.max(0, Math.min(100, progressPercent))));
+    }
+
+    private static void clearInteractionProgress(ServerPlayer player) {
+        ServerPlayNetworking.send(player, new InteractionProgressPayload(InteractionProgressPayload.KIND_CLEAR, (byte) 0));
     }
 
     private static Optional<BoardCellTarget> resolveBoardCell(ServerLevel level, BlockPos clickedPos) {
@@ -792,6 +913,27 @@ public final class MinesweeperGameplay {
                 cellPos.getY() + 0.5D,
                 cellPos.getZ() + 0.5D
         ) <= MAX_INTERACTION_DISTANCE_SQR;
+    }
+
+    private static boolean isHoldConfirmed(ServerPlayer player, int boardId, BlockPos cellPos, InteractionHand hand, int tick) {
+        ClientInteractionHold hold = CLIENT_INTERACTION_HOLDS.get(player.getUUID());
+        if (hold == null
+                || hold.boardId() != boardId
+                || hold.hand() != hand
+                || !hold.cellPos().equals(cellPos)
+                || tick - hold.lastHeartbeatTick() > HOLD_CONFIRMATION_GRACE_TICKS) {
+            return false;
+        }
+
+        HitResult hitResult = player.pick(2.5D, 0.0F, false);
+        if (!(hitResult instanceof BlockHitResult blockHit)) {
+            return false;
+        }
+
+        Optional<BoardCellTarget> currentTarget = resolveBoardCell((ServerLevel) player.level(), blockHit.getBlockPos());
+        return currentTarget.isPresent()
+                && currentTarget.get().board().boardId() == boardId
+                && currentTarget.get().cellPos().equals(cellPos);
     }
 
     private static boolean isCarryingFlag(Player player) {
@@ -820,6 +962,10 @@ public final class MinesweeperGameplay {
 
     private static int disablerCooldownTicks() {
         return MinesweeperRoundManager.activeSettings().disablerCooldownTicks();
+    }
+
+    private static int totemCooldownTicks() {
+        return MinesweeperRoundManager.activeSettings().totemCooldownTicks();
     }
 
     private enum PlayerInteractionAnimation {
@@ -859,5 +1005,8 @@ public final class MinesweeperGameplay {
     }
 
     private record BoardCellKey(int boardId, BlockPos minePos) {
+    }
+
+    private record ClientInteractionHold(int boardId, BlockPos cellPos, InteractionHand hand, int lastHeartbeatTick) {
     }
 }

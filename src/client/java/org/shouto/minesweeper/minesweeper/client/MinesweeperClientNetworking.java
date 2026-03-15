@@ -3,6 +3,7 @@ package org.shouto.minesweeper.minesweeper.client;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import org.shouto.minesweeper.minesweeper.network.payload.BoardSnapshotPayload;
+import org.shouto.minesweeper.minesweeper.network.payload.InteractionProgressPayload;
 import org.shouto.minesweeper.minesweeper.network.payload.PlayerInteractionAnimPayload;
 import org.shouto.minesweeper.minesweeper.network.payload.RoundStatePayload;
 
@@ -17,6 +18,10 @@ public final class MinesweeperClientNetworking {
 
         ClientPlayNetworking.registerGlobalReceiver(BoardSnapshotPayload.TYPE, (payload, context) ->
                 context.client().execute(() -> MinesweeperClientState.setLastSnapshot(payload))
+        );
+
+        ClientPlayNetworking.registerGlobalReceiver(InteractionProgressPayload.TYPE, (payload, context) ->
+                context.client().execute(() -> MinesweeperClientState.setInteractionProgress(payload))
         );
 
         ClientPlayNetworking.registerGlobalReceiver(PlayerInteractionAnimPayload.TYPE, (payload, context) ->

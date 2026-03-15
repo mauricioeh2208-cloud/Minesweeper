@@ -75,6 +75,7 @@ public final class MinesweeperRoundManager {
         PARTICIPANTS.add(playerId);
         SAVED_PLAYER_STATES.put(playerId, SavedPlayerState.capture(player));
         prepareRoundPlayer(player);
+        MinesweeperGameplay.initializeRoundPlayer(player);
 
         MinecraftServer server = ((net.minecraft.server.level.ServerLevel) player.level()).getServer();
         if (server != null) {
@@ -114,6 +115,7 @@ public final class MinesweeperRoundManager {
         roundStartTick = server.getTickCount();
         roundEndTick = roundStartTick + settings.roundDurationTicks();
         active = true;
+        MinesweeperGameplay.initializeRoundPlayers(participants);
         broadcast(server);
     }
 

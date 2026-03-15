@@ -1,6 +1,7 @@
 package org.shouto.minesweeper.minesweeper.client;
 
 import org.shouto.minesweeper.minesweeper.network.payload.BoardSnapshotPayload;
+import org.shouto.minesweeper.minesweeper.network.payload.InteractionProgressPayload;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.Map;
 public final class MinesweeperClientState {
     private static volatile boolean roundActive;
     private static volatile BoardSnapshotPayload lastSnapshot;
+    private static volatile ActiveInteractionProgress interactionProgress;
     private static final Map<Integer, ActivePlayerInteractionAnimation> PLAYER_INTERACTION_ANIMATIONS = new HashMap<>();
 
     private MinesweeperClientState() {
@@ -21,6 +23,7 @@ public final class MinesweeperClientState {
         roundActive = active;
         if (!active) {
             lastSnapshot = null;
+            interactionProgress = null;
             PLAYER_INTERACTION_ANIMATIONS.clear();
         }
     }
@@ -31,6 +34,21 @@ public final class MinesweeperClientState {
 
     public static void setLastSnapshot(BoardSnapshotPayload snapshot) {
         lastSnapshot = snapshot;
+    }
+
+    public static void setInteractionProgress(InteractionProgressPayload payload) {
+        if (payload.kindId() == InteractionProgressPayload.KIND_CLEAR) {
+            interactionProgress = null;
+            return;
+        }
+
+        InteractionProgressKind kind = InteractionProgressKind.fromNetworkId(payload.kindId());
+        float progress = Math.max(0.0F, Math.min(1.0F, (payload.progressPercent() & 0xFF) / 100.0F));
+        interactionProgress = new ActiveInteractionProgress(kind, progress);
+    }
+
+    public static ActiveInteractionProgress getInteractionProgress() {
+        return interactionProgress;
     }
 
     public static void startPlayerInteractionAnimation(
@@ -92,5 +110,28 @@ public final class MinesweeperClientState {
     }
 
     public record PlayerInteractionAnimationSnapshot(InteractionAnimationKind kind, float progress) {
+    }
+
+    public enum InteractionProgressKind {
+        REVEAL(InteractionProgressPayload.KIND_REVEAL),
+        DISARM(InteractionProgressPayload.KIND_DISARM);
+
+        private final byte networkId;
+
+        InteractionProgressKind(byte networkId) {
+            this.networkId = networkId;
+        }
+
+        public static InteractionProgressKind fromNetworkId(byte id) {
+            for (InteractionProgressKind kind : values()) {
+                if (kind.networkId == id) {
+                    return kind;
+                }
+            }
+            return REVEAL;
+        }
+    }
+
+    public record ActiveInteractionProgress(InteractionProgressKind kind, float progress) {
     }
 }
